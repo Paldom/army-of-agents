@@ -1,0 +1,96 @@
+{
+  "skill": "army-workload-adapter",
+  "cases": [
+    {
+      "type": "should_trigger",
+      "prompt": "point the agent army at my existing repo"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "import my agent roster from registry yaml"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "adapt this project so the workspace can run it"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "we already have markdown inbox and outbox files, how do I migrate"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "connect the fleet to an existing codebase without breaking it"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "onboard a second workload onto the same orchestrator"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "how do I map my charters onto agent contracts"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "make the workspace read my project's existing task queue"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "start the supervisor and open the workspace"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "write a contract for one new agent"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "how does an agent ask me something"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "merge three worktrees"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "migrate my database from postgres to mysql"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "port this python script to typescript"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "let an external session join as reviewer"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "set up CI for this repo"
+    },
+    {
+      "type": "quality",
+      "prompt": "point the fleet at our existing project",
+      "expected_behavior": [
+        "starts read-only: imports the roster and tails existing files without writing",
+        "does not modify the workload repo in the first pass",
+        "asks how answers should be attributed before opening any write path"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "we have signed approval files, should the workspace write them",
+      "expected_behavior": [
+        "refuses \u2014 the signed channel stays the sole authority for money-critical verbs",
+        "renders those asks as not-answerable-here rather than hiding them",
+        "keeps the workspace as a peer channel, not a replacement for the signed one"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "can I run two projects off one fleet",
+      "expected_behavior": [
+        "confirms it works via disjoint read and write allowlists per contract",
+        "warns that a shared vendor lane lets a busy workload starve a quiet one",
+        "recommends a separate budget account rather than assuming fairness"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "skill": "army-agent-contract",
+  "cases": [
+    { "type": "should_trigger", "prompt": "write a contract for a new research subagent" },
+    { "type": "should_trigger", "prompt": "define what this agent may read and write" },
+    { "type": "should_trigger", "prompt": "add an agent that watches for schema drift" },
+    { "type": "should_trigger", "prompt": "what should the completion criteria for this agent be" },
+    { "type": "should_trigger", "prompt": "two of my agents keep writing the same files" },
+    { "type": "should_trigger", "prompt": "give the archivist agent a proper charter" },
+    { "type": "should_trigger", "prompt": "how do I scope a disposable reviewer session" },
+    { "type": "should_trigger", "prompt": "my agent keeps widening its own scope" },
+    { "type": "should_not_trigger", "prompt": "start the agent army" },
+    { "type": "should_not_trigger", "prompt": "how does an agent ask me a question" },
+    { "type": "should_not_trigger", "prompt": "merge what the agents produced" },
+    { "type": "should_not_trigger", "prompt": "let a grok session review this" },
+    { "type": "should_not_trigger", "prompt": "write a job description for a data analyst" },
+    { "type": "should_not_trigger", "prompt": "what is an OpenAPI contract" },
+    { "type": "should_not_trigger", "prompt": "add a legal contract template to the repo" },
+    { "type": "should_not_trigger", "prompt": "configure the vendor lane limits" },
+    {
+      "type": "quality",
+      "prompt": "write a contract for an agent that tracks upstream releases",
+      "expected_behavior": [
+        "states all five clauses: reads, writes, owns, produces, done_when",
+        "makes the write allowlist disjoint from other running agents",
+        "writes completion criteria that are checkable, not aspirational"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "two agents keep colliding on the same files",
+      "expected_behavior": [
+        "diagnoses overlapping write allowlists rather than suggesting coordination",
+        "prefers giving each agent its own worktree over file-ownership rules",
+        "does not propose a locking scheme"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "set up a reviewer that grades another agent's output",
+      "expected_behavior": [
+        "uses a disposable unnamed session, not a named one",
+        "gives the reviewer no write access to what it reviews",
+        "explains that the reviewer must be graded-by-something-it-cannot-edit"
+      ]
+    }
+  ]
+}

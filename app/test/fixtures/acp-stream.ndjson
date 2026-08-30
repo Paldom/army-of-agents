@@ -1,0 +1,12 @@
+{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": 1, "clientInfo": {"name": "acpx", "version": "0.13.1"}}}
+{"jsonrpc": "2.0", "id": 0, "result": {"protocolVersion": 1, "agentCapabilities": {"promptCapabilities": {"image": true}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "help", "description": "help"}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Check"}, "messageId": "m1"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "ing the"}, "messageId": "m1"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": " queue."}, "messageId": "m1"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"_meta": {"claudeCode": {"toolName": "Bash"}}, "toolCallId": "t1", "sessionUpdate": "tool_call", "rawInput": {}, "status": "pending"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"_meta": {"claudeCode": {"toolName": "Bash"}}, "toolCallId": "t1", "sessionUpdate": "tool_call_update", "rawInput": {"command": "ls -la"}, "status": "completed"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"_meta": {"claudeCode": {"toolName": "Bash"}}, "toolCallId": "t2", "sessionUpdate": "tool_call", "rawInput": {"command": "codex exec 'check this'"}, "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "thinking"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"sessionUpdate": "usage_update", "used": 24127, "size": 1000000}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "\n\nOUTCOME: WORK_DONE"}, "messageId": "m1"}}}

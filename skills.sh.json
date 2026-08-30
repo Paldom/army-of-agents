@@ -1,0 +1,30 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "description": "Bring a continuously running agent fleet up, point it at a project, and keep it honest when it looks stuck.",
+      "skills": [
+        "army-run",
+        "army-workload-adapter"
+      ],
+      "title": "Run the fleet"
+    },
+    {
+      "description": "Say exactly what each agent may touch, what it owes you, and when it is finished.",
+      "skills": [
+        "army-agent-contract",
+        "army-join"
+      ],
+      "title": "Define the agents"
+    },
+    {
+      "description": "Answer agents on your own schedule, and reconcile what they produced without opening a terminal.",
+      "skills": [
+        "army-hitl",
+        "army-fanin"
+      ],
+      "title": "Stay in the loop"
+    }
+  ]
+}

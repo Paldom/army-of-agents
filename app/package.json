@@ -1,0 +1,29 @@
+{
+  "name": "army-of-agents-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Supervisor, server and web workspace for army-of-agents.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "supervisor": "node --experimental-strip-types src/supervisor/main.ts",
+    "serve": "node --experimental-strip-types src/server/main.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.21.3",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  }
+}

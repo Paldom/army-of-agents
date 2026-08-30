@@ -1,0 +1,48 @@
+{
+  "skill": "army-hitl",
+  "cases": [
+    { "type": "should_trigger", "prompt": "how should an agent ask me a question mid-run" },
+    { "type": "should_trigger", "prompt": "my agent blocks the whole session waiting for approval" },
+    { "type": "should_trigger", "prompt": "set up human-in-the-loop for these agents" },
+    { "type": "should_trigger", "prompt": "an agent approved something I never actually agreed to" },
+    { "type": "should_trigger", "prompt": "how do I answer an agent's question hours later" },
+    { "type": "should_trigger", "prompt": "replace our markdown approval files with the workspace" },
+    { "type": "should_trigger", "prompt": "what happens if nobody answers an ask" },
+    { "type": "should_trigger", "prompt": "stop agents from blocking on permission prompts" },
+    { "type": "should_not_trigger", "prompt": "write a contract for a new subagent" },
+    { "type": "should_not_trigger", "prompt": "start the supervisor" },
+    { "type": "should_not_trigger", "prompt": "merge the agents' worktrees" },
+    { "type": "should_not_trigger", "prompt": "add a human review step to our GitHub PR workflow" },
+    { "type": "should_not_trigger", "prompt": "how do I use approval gates in GitHub Actions" },
+    { "type": "should_not_trigger", "prompt": "set up on-call escalation in PagerDuty" },
+    { "type": "should_not_trigger", "prompt": "let a kimi session join as a second reviewer" },
+    { "type": "should_not_trigger", "prompt": "what is RLHF" },
+    {
+      "type": "quality",
+      "prompt": "my agent hangs waiting for me to approve a file write",
+      "expected_behavior": [
+        "explains that ACP permission escalation denies rather than waits when there is no TTY",
+        "moves the question to an agent-initiated ask that ends the turn",
+        "does not suggest raising a timeout"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "an agent acted on a stale approval",
+      "expected_behavior": [
+        "binds the verdict to an action hash plus policy version plus run version",
+        "re-asks on drift instead of honouring the old answer",
+        "explains that a free-text yes never authorizes an effect"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "what happens when I ignore an ask for a week",
+      "expected_behavior": [
+        "expiry pauses the agent and files a report",
+        "states plainly that expiry never auto-approves",
+        "explains the ask returns to the backlog rather than being lost"
+      ]
+    }
+  ]
+}

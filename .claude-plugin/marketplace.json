@@ -1,0 +1,15 @@
+{
+  "name": "army-of-agents",
+  "owner": {
+    "name": "Paldom",
+    "url": "https://github.com/Paldom"
+  },
+  "plugins": [
+    {
+      "name": "army-of-agents",
+      "source": ".",
+      "description": "A continuously running agent-orchestration system with a Slack-like web workspace: named agent sessions, in-thread human-in-the-loop, live terminals, browser takeover, and voice control.",
+      "category": "development"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "skill": "army-fanin",
+  "cases": [
+    {
+      "type": "should_trigger",
+      "prompt": "merge the three worktrees my agents produced"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "integrate what the fleet built this week"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "I have five agent branches and no idea which to keep"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "reconcile the parallel agent output into main"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "which agent wrote this change and did its tests pass"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "my worktrees are piling up and disk is filling"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "fan in the results from the parallel run"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "archive the losing branches after picking a winner"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "start the supervisor"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "write an agent contract"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "how do agents ask questions"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "let another harness join as reviewer"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "resolve this git merge conflict in one file"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "how do I rebase my feature branch"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "squash my last three commits"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "point the fleet at my repo"
+    },
+    {
+      "type": "quality",
+      "prompt": "integrate the output of three agents into main",
+      "expected_behavior": [
+        "shows per-change provenance: agent, harness, cost and test result",
+        "refuses to select a change whose tests failed or whose provenance is missing",
+        "archives losing worktrees rather than deleting them, then reaps merged ones"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "just merge everything the agents produced",
+      "expected_behavior": [
+        "declines to merge anonymous or untested changes",
+        "requires evidence rather than trust for each selected change",
+        "writes a provenance manifest alongside the merge"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "should I run five agents on this one feature",
+      "expected_behavior": [
+        "advises against fan-out for one feature inside one codebase",
+        "names the predictable collision set: schemas, manifests, lockfiles, barrel indexes",
+        "points out that review load, not machine time, is the bottleneck"
+      ]
+    }
+  ]
+}

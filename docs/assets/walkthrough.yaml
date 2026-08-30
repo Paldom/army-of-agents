@@ -1,0 +1,144 @@
+# Walkthrough: the workspace, in the order a human actually uses it.
+# The viewer's job in one sentence: answer the agent that is blocked on me,
+# then change the fleet without touching a terminal.
+schema: 1
+name: army-of-agents
+url: http://localhost:8791/
+viewport: { width: 1440, height: 900 }
+theme: paper
+output:
+  fps: 30
+  gif: { width: 1000, fps: 12 }
+  frame:
+    background: auto
+    chrome: true
+    title: army-of-agents
+
+steps:
+  - card:
+      style: hero
+      kicker: "army-of-agents"
+      title: "Threads are agents"
+      body: "A fleet that runs continuously, and one screen that answers the only question you ever have: which one needs me?"
+      duration: 2.6
+
+  # ── 1. the landing screen answers the question ──────────────────────────
+  - ring: "[data-testid=needs-panel]"
+  - move: { to: "[data-testid=needs-panel]" }
+  - card:
+      kicker: "Needs you"
+      title: "Only blockers appear here"
+      body: "Amber means an agent stopped and you are the reason. Nothing else ever badges."
+      at: "[data-testid=needs-panel]"
+      side: right
+      duration: 3.0
+  - ring: hide
+
+  - zoom: { to: "[data-testid=ask-card]", scale: 1.35, duration: 1.0 }
+  - card:
+      kicker: "The ask"
+      title: "It asked, then let go"
+      body: "The agent released its session. Nothing is pending, nothing retries — only your verdict moves it."
+      at: "[data-testid=ask-card]"
+      side: bottom
+      duration: 3.2
+  - move: { to: "[data-testid=ask-option]" }
+  - click: "[data-testid=ask-option]"
+  - wait: 0.4
+  - click: "[data-testid=answer]"
+  - wait: 0.8
+  - card:
+      kicker: "Durable"
+      title: "Answered hours later is normal"
+      body: "The verdict is a row. A reboot between the question and the answer costs nothing."
+      duration: 2.8
+  - zoom: reset
+
+  # ── 2. the gated ask the workspace refuses ──────────────────────────────
+  - zoom: { to: "[data-testid=ask-card]", scale: 1.3, duration: 0.9 }
+  - card:
+      kicker: "The line that does not move"
+      title: "Some things are not answerable here"
+      body: "Value-moving verbs need the signed owner channel. The workspace holds no mint for them, and says so."
+      at: "[data-testid=ask-card]"
+      side: top
+      duration: 3.2
+  - zoom: reset
+
+  # ── 3. the orchestrator: ask anything, approve first ────────────────────
+  - move: { to: "[data-testid=nav-orchestrator]" }
+  - click: "[data-testid=nav-orchestrator]"
+  - wait: 0.7
+  - card:
+      kicker: "Orchestrator"
+      title: "Talk to the whole fleet"
+      body: "Ask it anything. Investigations answer immediately; changes come back as a plan."
+      at: "[data-testid=orc-input]"
+      side: bottom
+      duration: 2.8
+  - click: "[data-testid=orc-input]"
+  - type: { text: "pause every research agent until the version conflict is settled", delay: 26 }
+  - click: "[data-testid=orc-send]"
+  - wait: 1.2
+  - zoom: { to: "[data-testid=plan-card]", scale: 1.3, duration: 1.0 }
+  - card:
+      kicker: "Nothing happens yet"
+      title: "It states the effects and waits"
+      body: "Which agents, which contracts, what budget — in words you can check. Apply is yours."
+      at: "[data-testid=plan-card]"
+      side: bottom
+      duration: 3.4
+  - move: { to: "[data-testid=plan-apply]" }
+  - click: "[data-testid=plan-apply]"
+  - wait: 1.0
+  - zoom: reset
+
+  # ── 4. backlog: nobody is stopped ───────────────────────────────────────
+  - click: "[data-testid=nav-backlog]"
+  - wait: 0.7
+  - card:
+      kicker: "Backlog"
+      title: "Decisions you owe, machine-ranked"
+      body: "Nobody is stopped here. The orchestrator ranks it every cycle — you do not sort it by hand."
+      duration: 3.0
+
+  # ── 5. accounts: capacity and identity, no secrets ──────────────────────
+  - click: "[data-testid=nav-accounts]"
+  - wait: 0.8
+  - card:
+      kicker: "Accounts"
+      title: "Three lanes out is normal"
+      body: "Quota is what binds. Agents on an exhausted lane are waiting, not broken."
+      duration: 3.0
+  - card:
+      kicker: "Credentials"
+      title: "No secret ever renders"
+      body: "A row confirms a credential exists and names its keychain item. There is no reveal control."
+      duration: 3.0
+
+  # ── 6. docs: a file browser, not a doc system ───────────────────────────
+  - click: "[data-testid=nav-docs]"
+  - wait: 1.0
+  - card:
+      kicker: "Docs"
+      title: "Just the project, browsable"
+      body: "Directory names carry the reading order. Markdown renders; links resolve here."
+      at: "[data-testid=file-tree]"
+      side: right
+      duration: 3.0
+
+  # ── 7. status: the whole fleet, and the alarm that matters ──────────────
+  - click: "[data-testid=nav-status]"
+  - wait: 0.8
+  - card:
+      kicker: "Status"
+      title: "Every agent, and why"
+      body: "Each status carries its reason. Backing off, capped and scheduled all mean nothing is wrong."
+      duration: 3.2
+
+  - card:
+      style: hero
+      kicker: "army-of-agents"
+      title: "The record is the system"
+      body: "Agents are rows, sessions are disposable, and the loop survives every restart."
+      duration: 2.8

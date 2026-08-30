@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "deslop": {
+      "source": "paldom/noslop",
+      "sourceType": "github",
+      "skillPath": "skills/deslop/SKILL.md",
+      "computedHash": "7537628553b15ac7ea5b49cc983cc123b86fb3b4aaf4d340f780bc886e212b8f"
+    },
+    "deslop-verify": {
+      "source": "paldom/noslop",
+      "sourceType": "github",
+      "skillPath": "skills/deslop-verify/SKILL.md",
+      "computedHash": "75937859fa14eddc6a95fbfe3da46492fb4aeb1c756bf2e6860c1c692c7bf980"
+    },
+    "slop-lint": {
+      "source": "paldom/noslop",
+      "sourceType": "github",
+      "skillPath": "skills/slop-lint/SKILL.md",
+      "computedHash": "6f6a23bfaef238f0288328bfffe9854d9b125f36c0c10d1f026f3f0071f489ef"
+    },
+    "walkthrough-record": {
+      "source": "paldom/screenshooter",
+      "sourceType": "github",
+      "skillPath": "skills/walkthrough-record/SKILL.md",
+      "computedHash": "f56aabdeea5bfdd2238932efa3c4a926b6aa5a9f60009f4de64d5aba84befb74"
+    },
+    "walkthrough-storyboard": {
+      "source": "paldom/screenshooter",
+      "sourceType": "github",
+      "skillPath": "skills/walkthrough-storyboard/SKILL.md",
+      "computedHash": "681d5e3665c407fcbaaee50b88cd2247cf127abf83da88c1f214881dfbc92a2c"
+    }
+  }
+}

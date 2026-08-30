@@ -141,3 +141,36 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# --- Agent Skills scaffold ---
+# Local-only workspace: research sources, prompts, drafts for skill building.
+# Deliberately never committed — except its README, which explains the convention.
+.local/*
+!.local/README.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Claude Code per-machine settings
+.claude/settings.local.json
+
+# Third-party skills installed locally for authoring (noslop, screenshooter).
+# The repo's own bundled dev skills (add-skill, publish-repo) stay committed.
+.claude/skills/deslop/
+.claude/skills/deslop-verify/
+.claude/skills/slop-lint/
+.claude/skills/walkthrough-record/
+.claude/skills/walkthrough-storyboard/
+
+# local runtime config, never committed
+aoa.env
+aoa.db*

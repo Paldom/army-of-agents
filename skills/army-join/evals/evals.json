@@ -1,0 +1,96 @@
+{
+  "skill": "army-join",
+  "cases": [
+    {
+      "type": "should_trigger",
+      "prompt": "let a codex session join as a reviewer"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "bring another harness in to cross-check this agent"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "I want a second opinion from a different model on this artifact"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "have my grok CLI answer questions for the scout agent"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "how does an outside session participate in the fleet"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "add a cross-reviewer from another tool"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "join this session to the orchestrator as an extra human-in-the-loop"
+    },
+    {
+      "type": "should_trigger",
+      "prompt": "what context package does a joining session get"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "start the agent army"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "write a contract for a subagent"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "how do I answer an ask"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "merge the worktrees"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "invite a teammate to my GitHub repo"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "join two dataframes on a key"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "add someone to the Slack workspace"
+    },
+    {
+      "type": "should_not_trigger",
+      "prompt": "point the fleet at my repo"
+    },
+    {
+      "type": "quality",
+      "prompt": "let a session in another harness review the scout agent's output",
+      "expected_behavior": [
+        "hands over a scoped package: artifact, contract, review criteria, and where to respond",
+        "does not give the joiner access to the store or other agents' threads",
+        "marks the result untrusted and states it carries no authority"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "can the joined reviewer approve the pending ask",
+      "expected_behavior": [
+        "refuses \u2014 only an authenticated owner session resolves an ask",
+        "explains that a joined session's output is data",
+        "does not offer a flag to override this"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "two joined sessions keep messaging each other",
+      "expected_behavior": [
+        "applies a hop limit that kills the chain rather than degrading it",
+        "makes per-chain token accounting visible",
+        "uses asymmetric wake rules so agent-to-agent needs an explicit mention"
+      ]
+    }
+  ]
+}

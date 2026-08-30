@@ -1,0 +1,48 @@
+{
+  "skill": "army-run",
+  "cases": [
+    { "type": "should_trigger", "prompt": "start the agent army" },
+    { "type": "should_trigger", "prompt": "run the orchestrator loop and open the workspace" },
+    { "type": "should_trigger", "prompt": "bring up army-of-agents on this machine" },
+    { "type": "should_trigger", "prompt": "the supervisor isn't dispatching anything, why" },
+    { "type": "should_trigger", "prompt": "how do I launch the continuous agent system" },
+    { "type": "should_trigger", "prompt": "my agents stopped waking up after a reboot" },
+    { "type": "should_trigger", "prompt": "start the fleet and give me the workspace url" },
+    { "type": "should_trigger", "prompt": "set up the always-on loop for my project" },
+    { "type": "should_not_trigger", "prompt": "write a contract for a new research subagent" },
+    { "type": "should_not_trigger", "prompt": "how should an agent ask me a question mid-run" },
+    { "type": "should_not_trigger", "prompt": "merge the three worktrees my agents produced" },
+    { "type": "should_not_trigger", "prompt": "let a codex session join as a reviewer" },
+    { "type": "should_not_trigger", "prompt": "point the system at my existing repo" },
+    { "type": "should_not_trigger", "prompt": "npm install express and start a web server" },
+    { "type": "should_not_trigger", "prompt": "what does tmux attach do" },
+    { "type": "should_not_trigger", "prompt": "deploy this app to production" },
+    {
+      "type": "quality",
+      "prompt": "start the agent army against this repo",
+      "expected_behavior": [
+        "starts the supervisor and the workspace as two processes, not one",
+        "prints the workspace URL and the auth token",
+        "does not invent agents — an empty fleet is a valid starting state"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "the supervisor is running but nothing ever dispatches",
+      "expected_behavior": [
+        "checks whether agents are ACTIVE and next_due_at is in the past",
+        "checks provider_gates for an exhausted vendor lane before blaming the agent",
+        "explains that a failed precondition is a normal idle tick, not a fault"
+      ]
+    },
+    {
+      "type": "quality",
+      "prompt": "how much does it cost to leave ten agents running overnight",
+      "expected_behavior": [
+        "explains that NO_WORK backs off exponentially to the ceiling",
+        "explains that the LLM-free precondition means an idle agent spends no vendor turn",
+        "does not promise a dollar figure it cannot know"
+      ]
+    }
+  ]
+}

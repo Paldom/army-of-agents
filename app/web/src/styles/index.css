@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/*
+ * Typography and colour are set here once, not sprinkled at call sites.
+ *
+ * The tone system is the whole information architecture: `blocker` is amber and
+ * is the ONLY tone that badges, counts or notifies. Everything else means
+ * nothing is wrong, and must not compete for attention.
+ */
+@theme {
+  --color-bg: oklch(0.985 0 0);
+  --color-surface: oklch(1 0 0);
+  --color-fg: oklch(0.16 0.01 265);
+  --color-muted: oklch(0.968 0.002 265);
+  --color-muted-fg: oklch(0.52 0.014 265);
+  --color-border: oklch(0.922 0.004 265);
+
+  --color-blocker: oklch(0.52 0.16 42);
+  --color-blocker-bg: oklch(0.977 0.02 68);
+  --color-blocker-border: oklch(0.9 0.06 68);
+
+  --color-working: oklch(0.5 0.12 240);
+  --color-working-bg: oklch(0.975 0.02 240);
+  --color-fail: oklch(0.51 0.19 27);
+  --color-fail-bg: oklch(0.972 0.02 20);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    /* 15px/1.55 is the reading size this console was tuned at. Do not scale it
+       per-component; change it here or not at all. */
+    font-size: 15px;
+    line-height: 1.55;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Headings share one scale so a page never invents its own. */
+  h1 { @apply text-[26px] font-semibold tracking-[-0.02em] leading-tight; }
+  h2 { @apply text-[17px] font-semibold tracking-[-0.01em]; }
+  h3 { @apply text-[15px] font-semibold; }
+  /* Mono is for values a human reads and trusts: ids, paths, hashes, durations. */
+  code, kbd, samp, pre { @apply font-mono text-[13px]; }
+  ::selection { @apply bg-blocker/15; }
+  :focus-visible { @apply outline-2 outline-offset-2 outline-working; }
+}
+
+@layer utilities {
+  .prose-doc { @apply text-[14px] leading-[1.65]; }
+  .prose-doc h1 { @apply text-[22px] mt-6 mb-2; }
+  .prose-doc h2 { @apply text-[17px] mt-5 mb-2; }
+  .prose-doc h3 { @apply text-[15px] mt-4 mb-1.5; }
+  .prose-doc p  { @apply my-2.5; }
+  .prose-doc ul { @apply my-2.5 ml-5 list-disc; }
+  .prose-doc li { @apply my-1; }
+  .prose-doc code { @apply bg-muted px-1.5 py-0.5 rounded; }
+  .prose-doc pre { @apply bg-muted p-3 rounded-lg overflow-auto my-3; }
+  .prose-doc pre code { @apply bg-transparent p-0; }
+  .prose-doc a { @apply text-working underline underline-offset-2; }
+  .prose-doc table { @apply my-3 w-full text-[13px]; }
+  .prose-doc td, .prose-doc th { @apply border border-border px-2.5 py-1.5 text-left; }
+}
