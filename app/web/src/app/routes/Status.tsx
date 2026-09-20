@@ -1,13 +1,16 @@
-import { useWorkspace } from '@/shared/api/queries';
+import { useDoctor, useWorkspace } from '@/shared/api/queries';
 import { useUi } from '@/shared/store/ui';
-import { Button, Card, CardBody, StatusChip, Empty, Mono, Note } from '@/components/ui/primitives';
+import { Button, Card, CardBody, Chip, StatusChip, Empty, Mono, Note } from '@/components/ui/primitives';
+import { ago } from '@/shared/format';
 
 export function Status() {
   const { data } = useWorkspace();
   const { openAgent } = useUi();
 
+  const { data: doc } = useDoctor();
   const f = data?.fleet;
   if (!f) return <Empty title="No fleet yet." />;
+  const pulse = f.supervisor;
 
   return (
     <>
@@ -18,6 +21,19 @@ export function Status() {
         <b className="text-fg">{f.counts.fine}</b> fine. Nothing in the last group is broken.
       </p>
 
+      {!pulse.alive && (
+        <Card tone="blocker" className="mb-5" data-testid="supervisor-down">
+          <CardBody>
+            <b>The supervisor is not running.</b>
+            <Note className="mt-0.5">
+              {pulse.lastTickAt ? `Last tick ${ago(Date.now() - pulse.lastTickAt)} ago.` : 'It has never ticked against this store.'}{' '}
+              The workspace can record answers and messages, but nothing wakes until the loop is started
+              (<Mono>./scripts/aoa up</Mono>).
+            </Note>
+          </CardBody>
+        </Card>
+      )}
+
       {f.lostWake.length > 0 && (
         <Card tone="blocker" className="mb-5">
           <CardBody>
@@ -26,6 +42,26 @@ export function Status() {
               Active with no live run and no next wake: <Mono>{f.lostWake.join(', ')}</Mono>.
               A lost bump is visible here rather than silent.
             </Note>
+          </CardBody>
+        </Card>
+      )}
+
+      {doc && (
+        <Card className="mb-5" data-testid="doctor">
+          <CardBody>
+            <b>Doctor</b>
+            <Note className="mb-2 mt-0.5">
+              What is installed and configured on this host. Optional pieces degrade on purpose; this says which did.
+            </Note>
+            <ul className="divide-y divide-border">
+              {doc.checks.map((c) => (
+                <li key={c.id} className="flex items-baseline gap-3 py-1.5 text-[13px]">
+                  <Chip tone={c.ok ? 'working' : c.optional ? 'quiet' : 'blocker'}>{c.ok ? 'ok' : c.optional ? 'off' : 'missing'}</Chip>
+                  <Mono className="w-[150px] shrink-0">{c.id}</Mono>
+                  <span className={c.ok ? '' : 'text-muted-fg'}>{c.detail}</span>
+                </li>
+              ))}
+            </ul>
           </CardBody>
         </Card>
       )}

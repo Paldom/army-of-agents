@@ -14,6 +14,7 @@ hours, and a reboot in between costs nothing.
 
 [![CI](https://github.com/Paldom/army-of-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/Paldom/army-of-agents/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![skills.sh](https://skills.sh/b/paldom/army-of-agents)](https://skills.sh/paldom/army-of-agents)
 
 ![The workspace: answering a blocked agent, then changing the fleet](docs/assets/walkthrough.gif)
 
@@ -33,6 +34,10 @@ This fixes all three by moving the state out of the process:
 - **Idle is free.** A cheap LLM-free precondition runs before any session is
   spawned, and `NO_WORK` backs off exponentially. Ten idle agents cost nothing.
 - **Asking never blocks.** A question is a durable row, not a parked coroutine.
+- **Saying is not asking.** A `REPORT:` line lands in the agent's thread the
+  moment it is written, mid-turn; a `NOTIFY:` reaches you without needing an
+  answer; a `SEND: @slug` reaches another agent. Threads are never empty for as
+  long as an agent works.
 
 ## Quick start
 
@@ -45,7 +50,9 @@ cd army-of-agents
 ```
 
 It prints the URL with a token in it, generated once and kept.
-`./scripts/aoa status|logs|attach|down ~/code/your-project`.
+`./scripts/aoa status|logs|attach|doctor|down ~/code/your-project`. `doctor`
+says what is installed and configured on this host, and what each missing
+piece would change.
 
 **The skill directory holds no project state.** A fleet's store, config and
 worktrees live beside the project it works on, so one checkout drives any
@@ -66,8 +73,8 @@ sessions alone: a turn in flight is finished and reconciled on the next start,
 not destroyed because you restarted the loop.
 
 Requires `tmux` and `acpx` with at least one logged-in agent CLI. An empty
-fleet is a valid starting state; create agents by asking the orchestrator,
-which proposes and waits for you.
+fleet is a valid starting state: the orchestrator is created on first start,
+and you create agents by asking it. It proposes and waits for you.
 
 **The one setting to think about is `AOA_MAX_IN_FLIGHT`** (default 6). Every
 turn in flight is a live vendor session, so it is the quota control, not a
@@ -122,19 +129,39 @@ done, so they are one transaction with one writer.
 ### Six destinations
 
 **Needs you** · **Orchestrator** · **Backlog** · **Accounts** · **Docs** ·
-**Status**. Needs you is the landing view and the simplest screen in the app.
+**Status**. Needs you is the landing view and the simplest screen in the app:
+open asks first, then notices, which need no answer.
 
 Amber means *you are the blocker*, and it is the only colour that badges or
 notifies. `WAITING_RESOURCE`, `BACKING_OFF` and `SCHEDULED` mean nothing is
 wrong. Several vendor lanes being exhausted at once is the ordinary state of
 this system, not an incident.
 
+Status carries the **Doctor** — node, acpx, each harness CLI, tmux, node-pty,
+git, the state directory, the browser toolchain, voice, the event hook — and
+the supervisor's last tick. When the loop is not ticking the screen says so in
+red, because the workspace can record answers but cannot wake anyone.
+
+Every agent has a thread: what it reported while working, what it asked, what
+you answered, what other agents sent it, and what the loop did to it, in order,
+each row naming its author. You write in the thread too; a human message wakes
+an active agent, and the reply lands in the same place on its next turn.
+
 ### The orchestrator asks before it acts
 
+It exists on every store — both processes create it on start — and it is an
+agent like any other: woken by your messages, considered before every other
+agent, with one dispatch slot reserved so a busy fleet cannot make it
+unreachable. It cannot be retired.
+
 You can ask it anything that changes the fleet: pause a channel, create an
-agent, retire one, re-rank the backlog. It answers investigations immediately.
-Changes come back as a **plan card** naming the concrete effects (which agents,
-which contracts, what budget) and waits for **Apply**.
+agent, retire one, re-rank the backlog. Commands are parsed deterministically
+and come back as a **plan card** naming the concrete effects (which agents,
+which contracts, what budget), waiting for **Apply**. Questions go to its
+session, which sees a briefing of the whole fleet — every agent's status and
+why, open asks, the top of the backlog — and answers in its thread. When it
+wants a change itself it writes a `PROPOSE:` line, which becomes a plan card
+too.
 
 Investigations run immediately. Changes never do.
 
@@ -152,6 +179,18 @@ Investigations run immediately. Changes never do.
   keychain item. There is no value field and no reveal control.
 - **Merge an anonymous change.** Fan-in refuses anything whose agent, harness or
   test result is unknown.
+- **Act on quoted text.** A marker inside a code fence, or the protocol's own
+  examples echoed back, is not a marker. Anything an agent receives is data,
+  whoever appears to have written it.
+
+### Reaching you when you are not looking
+
+`AOA_EVENT_HOOK` names a command that receives each `ask.opened`, `agent.notify`
+or `alarm.lost_wake` event as JSON on stdin. Wire it to a push, an e-mail, or
+[agents-connect](https://github.com/Paldom/agents-connect)'s `aconn notify`;
+the payload carries what an answer must echo back. The markers, the delivery
+rules, and the agents-connect mapping are in
+[docs/agent-protocol.md](docs/agent-protocol.md).
 
 ## The app is a runtime, not a screen set
 
@@ -171,19 +210,25 @@ destinations do not need a component catalogue.
 
 Each agent's turn runs inside its own tmux session, so the terminal tab shows
 the live process rather than a transcript. Worktrees are created beside the
-project as `<project>-agents/<slug>`, never inside it.
+project as `<project>-agents/<slug>`, never inside it. The Browser tab attaches
+to the agent's stealth browser over the DevTools protocol when its identity
+publishes an endpoint, and says which piece is missing when it does not.
+
+Harnesses are rows: `<project>-agents/harnesses.json` adds an acpx adapter or
+corrects a capability without a code change.
 
 ## Development
 
 ```bash
-make check        # validator + app typecheck + web build/tests + 65 proofs
-make app-test     # the milestone proofs on their own
+make check        # validator + evals + app typecheck + web build/tests + the proofs
+make app-test     # the proofs on their own
 ```
 
 The tests are written as proofs of specific properties, not coverage: an idle
 agent backing off across a reboot, one live run per agent under a race, a
-verdict surviving a restart, an agent unable to read another vendor's config, and
-a fresh body resuming a mission it never saw the transcript of.
+verdict surviving a restart, an agent unable to read another vendor's config, a
+fresh body resuming a mission it never saw the transcript of, a REPORT line
+readable before its turn ends, and a turn running inside a real tmux pane.
 
 ## Credits
 

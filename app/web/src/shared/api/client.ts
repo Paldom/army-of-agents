@@ -5,7 +5,7 @@
  * way only, so the data layer stays testable without mounting a tree.
  */
 import type {
-  AccountsView, AnswerResult, FileContent, FileEntry, Plan, WorkspaceState,
+  AccountsView, AnswerResult, Check, FileContent, FileEntry, Message, Plan, WorkspaceState,
 } from './types';
 
 const TOKEN_KEY = 'aoa_token';
@@ -51,6 +51,11 @@ export const api = {
   saveFile: (path: string, content: string) =>
     req<{ ok: boolean; error?: string }>('/file', { method: 'PUT', body: JSON.stringify({ path, content }) }),
   agentDocs: (slug: string) => req<{ relevant: FileEntry[] }>(`/agents/${encodeURIComponent(slug)}/docs`),
+  thread: (slug: string, after = 0) =>
+    req<Message[]>(`/agents/${encodeURIComponent(slug)}/thread?after=${after}`),
+  sendMessage: (slug: string, text: string) =>
+    post<{ id: string; seq: number; woke: boolean }>(`/agents/${encodeURIComponent(slug)}/message`, { text }),
+  doctor: () => req<{ checks: Check[] }>('/doctor'),
 
   answer: (askId: string, body: { optionId?: string; text?: string; actionHash?: string; policyVersion?: string }) =>
     post<AnswerResult>(`/asks/${askId}/answer`, body),

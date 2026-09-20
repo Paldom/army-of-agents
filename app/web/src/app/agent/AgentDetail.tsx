@@ -7,8 +7,8 @@ import { Suspense, lazy } from 'react';
 // every other screen pay for a terminal nobody opened.
 const TerminalView = lazy(() => import('@/app/agent/Terminal').then((m) => ({ default: m.TerminalView })));
 const BrowserView = lazy(() => import('@/app/agent/Browser').then((m) => ({ default: m.BrowserView })));
+import { ThreadView } from '@/app/agent/ThreadView';
 import { Button, Card, CardBody, Empty, Mono, Note, StatusChip } from '@/components/ui/primitives';
-import { when } from '@/shared/format';
 import { cn } from '@/lib';
 
 const TABS = ['Thread', 'Terminal', 'Browser', 'Contract', 'Reports'] as const;
@@ -29,7 +29,10 @@ export function AgentDetail({ slug }: { slug: string }) {
         <span className="ml-auto"><StatusChip status={a.status} /></span>
       </div>
       {a.responsibility && <p className="mt-1.5 max-w-[72ch] text-muted-fg">{a.responsibility}</p>}
-      <Note className="mt-1">{a.why}</Note>
+      <Note className="mt-1">
+        {a.why}
+        {a.unread > 0 && <> · <Mono>{a.unread} unread</Mono> in its inbox</>}
+      </Note>
 
       <div className="mb-5 mt-4 flex gap-1 border-b border-border" role="tablist">
         {TABS.map((t) => (
@@ -45,16 +48,7 @@ export function AgentDetail({ slug }: { slug: string }) {
         ))}
       </div>
 
-      {tab === 'Thread' && (
-        <Card><CardBody>
-          {a.latestReport ? (
-            <>
-              <Mono>latest report · {when(a.latestReport.at)}</Mono>
-              <p className="mt-1 text-[14px]">{a.latestReport.body}</p>
-            </>
-          ) : <Note>No report yet. This agent has not produced work since it was imported.</Note>}
-        </CardBody></Card>
-      )}
+      {tab === 'Thread' && <ThreadView slug={a.slug} />}
       {tab === 'Terminal' && (
         <Suspense fallback={<Note>Loading terminal…</Note>}>
           <TerminalView session={a.sessionName} />
@@ -79,11 +73,7 @@ export function AgentDetail({ slug }: { slug: string }) {
         </CardBody></Card>
       )}
       {tab === 'Reports' && (
-        <Card><CardBody>
-          {a.latestReport
-            ? <p className="text-[14px]">{a.latestReport.body}</p>
-            : <Note>No reports yet.</Note>}
-        </CardBody></Card>
+        <ThreadView slug={a.slug} composer={false} filter={(m) => m.kind === 'report' || m.kind === 'notify'} />
       )}
     </>
   );

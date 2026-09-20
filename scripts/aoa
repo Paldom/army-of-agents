@@ -83,6 +83,12 @@ case "$CMD" in
   restart) "$0" down "$PROJECT"; sleep 1; "$0" up "$PROJECT" ;;
   attach)  exec tmux attach -t "$SESSION" ;;
   logs)    tmux capture-pane -p -S -200 -t "$SESSION:loop" ;;
+  doctor)
+    # What is installed and configured, from the running workspace's own checks.
+    curl -sf -H "authorization: Bearer $AOA_TOKEN" "http://127.0.0.1:$AOA_PORT/api/doctor" \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const c of JSON.parse(s).checks)console.log(`${c.ok?"ok     ":c.optional?"off    ":"MISSING"} ${c.id.padEnd(18)} ${c.detail}`)})' \
+      || { echo "workspace not answering on $AOA_PORT; is it up?" >&2; exit 1; }
+    ;;
   status)
     tmux has-session -t "$SESSION" 2>/dev/null && echo "loop+workspace: up" || echo "loop+workspace: down"
     curl -sf -o /dev/null -H "authorization: Bearer $AOA_TOKEN" "http://127.0.0.1:$AOA_PORT/api/state" \
@@ -90,5 +96,5 @@ case "$CMD" in
     echo "store: $AOA_DB"
     echo "agent terminals: $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c "^$NS-" || true)"
     ;;
-  *) echo "usage: $0 {up|down|restart|attach|logs|status} [project-dir]" >&2; exit 2 ;;
+  *) echo "usage: $0 {up|down|restart|attach|logs|status|doctor} [project-dir]" >&2; exit 2 ;;
 esac

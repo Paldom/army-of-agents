@@ -1,4 +1,4 @@
-import { type Db, cas, emit, id, now, tx } from '../store/db.ts';
+import { type Db, appendMessage, cas, emit, id, now, tx } from '../store/db.ts';
 import { type Outcome, type RunState, TERMINAL, assertLegal } from './state.ts';
 import { type WakePolicy, computeNextWake, parseWake } from './wake.ts';
 import { type Derivation, derive } from './derived.ts';
@@ -246,8 +246,77 @@ export function succeed(
       .get(agent.id, run.started_at) as { n: number };
 
     const humanBumped = answeredSince.n > 0 && agent.wake_reason === 'human';
-    const nextDueAt = humanBumped ? (agent.next_due_at ?? nowMs) : next.nextDueAt;
-    const wakeReason = humanBumped ? 'human' : next.wakeReason;
+    let nextDueAt = humanBumped ? (agent.next_due_at ?? nowMs) : next.nextDueAt;
+    let wakeReason = humanBumped ? 'human' : next.wakeReason;
+
+    // The lane is gated durably, and the agent is due the moment it reopens.
+    // "Not due until the lane reopens" used to mean no due time at all, and
+    // nothing ever wrote one when the gate lifted: every agent that had ever
+    // hit a 429 slept for good, invisible to the lost-wake alarm.
+    if (outcome === 'RATE_LIMITED' && !humanBumped) {
+      nextDueAt = laneBlockedUntil(db, agent.harness) ?? nowMs + 3_600_000;
+      wakeReason = 'schedule';
+    }
+
+    // The messages this run was dispatched with. A turn that completed has
+    // read them: acked here, in the settle's own transaction, so a crash
+    // before this point redelivers and a crash after it cannot re-wake the
+    // agent for mail it already read. A turn that did NOT complete — killed,
+    // errored, refused by the vendor — releases them for the next wake, and
+    // the third failure parks them rather than retrying forever.
+    // Only the leases THIS run holds (a lease with no run id predates the
+    // column and is treated as this run's, since one live run per agent is
+    // enforced by the schema).
+    const recipient = `agent:${agent.slug}`;
+    const mine = `recipient = ? AND state = 'LEASED' AND (lease_run_id = ? OR lease_run_id IS NULL)`;
+    const consumed = outcome === 'WORK_DONE' || outcome === 'NO_WORK' || outcome === 'BLOCKED';
+    if (consumed) {
+      db.prepare(`UPDATE message_deliveries SET state = 'ACKED', lease_until = NULL WHERE ${mine}`).run(
+        recipient, runId,
+      );
+      // The verdicts this run was dispatched with are carried. One answered
+      // mid-run was not in the capsule and stays owed.
+      db.prepare(
+        `UPDATE approval_requests SET consumed_at = ? WHERE agent_id = ? AND state = 'APPROVED'
+           AND consumed_at IS NULL AND answered_at IS NOT NULL AND answered_at <= ?`,
+      ).run(nowMs, agent.id, run.started_at);
+    } else {
+      // A human's words are never parked: the backoff is the only limit on
+      // retrying them. Agent-to-agent mail that could not be delivered three
+      // times is a dead letter, said so in the thread.
+      const dead = db
+        .prepare(
+          `UPDATE message_deliveries SET state = 'DEAD', lease_until = NULL WHERE ${mine} AND attempts >= 3
+             AND message_id IN (SELECT id FROM messages WHERE kind != 'human')`,
+        )
+        .run(recipient, runId).changes;
+      db.prepare(`UPDATE message_deliveries SET state = 'QUEUED', lease_until = NULL WHERE ${mine}`).run(
+        recipient, runId,
+      );
+      if (dead > 0) {
+        emit(db, 'message.dead', 'system', { count: dead, runId }, agent.id);
+        appendMessage(db, {
+          agentId: agent.id, kind: 'event', author: 'system', runId,
+          body: `${dead} message(s) parked after three failed deliveries. A human message is never parked.`,
+        });
+      }
+    }
+
+    // Mail that arrived while a COMPLETED turn ran is still QUEUED. Its
+    // delivery bumped the wake, and the scheduler-computed wake above would
+    // overwrite that bump — the verdict race again, in a different costume.
+    // One more wake, now, for an inbox that is not empty. A FAILED turn keeps
+    // its error backoff: waking at once on released mail would burn three
+    // attempts in three ticks against a session that cannot start.
+    if (consumed && !humanBumped) {
+      const queued = db
+        .prepare(`SELECT COUNT(*) AS n FROM message_deliveries WHERE recipient = ? AND state = 'QUEUED'`)
+        .get(recipient) as { n: number };
+      if (queued.n > 0 && (nextDueAt === null || nextDueAt > nowMs)) {
+        nextDueAt = nowMs;
+        wakeReason = 'event';
+      }
+    }
 
     db.prepare(
       `UPDATE agents SET next_due_at = ?, wake_reason = ?, idle_streak = ?, error_streak = ?,
@@ -263,9 +332,27 @@ export function succeed(
       agent.id,
     );
 
-    emit(db, 'run.settled', 'system', { runId, outcome, nextDueAt: next.nextDueAt }, agent.id);
-    return { nextDueAt: next.nextDueAt, wakeReason: next.wakeReason };
+    emit(db, 'run.settled', 'system', { runId, outcome, nextDueAt }, agent.id);
+    return { nextDueAt, wakeReason };
   });
+}
+
+/**
+ * Let a run that stopped to wait for a human go. A BLOCKED turn parks its
+ * run in `waiting_human`, which the one-live-run index and the tick both
+ * treat as live — correctly, while the question is open. Once a verdict, a
+ * cancellation or an expiry has settled the question, the run has to become
+ * terminal or the woken agent can never be dispatched: its next run cannot
+ * open, and the tick skips it as "another tick owns it". Live, an answered
+ * agent sat WAITING_HUMAN with its verdict in hand until the store was edited.
+ */
+export function releaseWaitingRun(db: Db, agentId: string): number {
+  return db
+    .prepare(
+      `UPDATE runs SET state = 'continue', ended_at = COALESCE(ended_at, ?), version = version + 1
+       WHERE agent_id = ? AND state = 'waiting_human'`,
+    )
+    .run(now(), agentId).changes;
 }
 
 /**

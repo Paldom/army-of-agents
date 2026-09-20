@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync, existsSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,13 +106,43 @@ export interface TmuxRunnerOptions {
   queuedMs?: number;
   /** Called with the job dir as soon as it exists, so a crash can reconcile it. */
   onJob?: (job: string) => void;
+  /**
+   * Environment for the turn, on top of the pane shell's own. PATH travels
+   * by default, because the shell inside tmux does not inherit the
+   * supervisor's; `AOA_ACPX_BIN` names the binary the wrapper spawns.
+   */
+  env?: Record<string, string>;
 }
 
 export type RunFailure = 'pane timed out' | 'queued behind an orphaned prompt' | 'wrapper died';
 
+/**
+ * Read whatever the capture file gained since `offset`. The wrapper appends
+ * and never rewrites, so an offset is a complete cursor; a chunk may end
+ * mid-character, which is why the callback gets bytes.
+ */
+export function tailFrom(path: string, offset: number, onChunk: (chunk: Buffer) => void): number {
+  let size: number;
+  try {
+    size = statSync(path).size;
+  } catch {
+    return offset;
+  }
+  if (size <= offset) return offset;
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.alloc(size - offset);
+    const n = readSync(fd, buf, 0, buf.length, offset);
+    if (n > 0) onChunk(buf.subarray(0, n));
+    return offset + n;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function tmuxRunner(opts: TmuxRunnerOptions): Runner {
   return {
-    async run(args, input) {
+    async run(args, input, onOutput) {
       if (!ensureTmux(opts.session, opts.cwd)) {
         return { code: -1, stdout: '', stderr: 'tmux session unavailable' };
       }
@@ -119,6 +151,14 @@ export function tmuxRunner(opts: TmuxRunnerOptions): Runner {
       try {
         writeFileSync(join(job, 'argv.json'), JSON.stringify(args));
         writeFileSync(join(job, 'input.txt'), input ?? '');
+        writeFileSync(
+          join(job, 'env.json'),
+          JSON.stringify({
+            ...(process.env['PATH'] ? { PATH: process.env['PATH'] } : {}),
+            ...(process.env['AOA_ACPX_BIN'] ? { AOA_ACPX_BIN: process.env['AOA_ACPX_BIN'] } : {}),
+            ...opts.env,
+          }),
+        );
         opts.onJob?.(job);
 
         // Single-quoted paths from mkdtemp: no metacharacters, but quoted so a
@@ -127,6 +167,8 @@ export function tmuxRunner(opts: TmuxRunnerOptions): Runner {
         execFileSync('tmux', ['send-keys', '-t', opts.session, cmd, 'Enter'], { stdio: 'ignore' });
 
         const exitFile = join(job, 'exit');
+        const capturePath = join(job, 'stdout.ndjson');
+        let tailed = 0;
         const startedAt = Date.now();
         const deadline = startedAt + (opts.timeoutMs ?? 1_800_000);
         const queuedMs = opts.queuedMs ?? 90_000;
@@ -160,8 +202,12 @@ export function tmuxRunner(opts: TmuxRunnerOptions): Runner {
           }
 
           if (now > deadline) return fail('pane timed out');
+          if (onOutput) tailed = tailFrom(capturePath, tailed, onOutput);
           await new Promise((r) => setTimeout(r, pollMs));
         }
+        // The exit sentinel is written after the capture is flushed, so one
+        // more read here sees everything the poll loop had not yet.
+        if (onOutput) tailFrom(capturePath, tailed, onOutput);
         const code = Number(readFileSync(exitFile, 'utf8').trim());
         const stdout = existsSync(join(job, 'stdout.ndjson'))
           ? readFileSync(join(job, 'stdout.ndjson'), 'utf8')

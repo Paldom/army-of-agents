@@ -1,4 +1,5 @@
 import { type Db, appendMessage, emit, now, tx } from '../store/db.ts';
+import { type AgentRow, bumpWake } from './repo.ts';
 
 /**
  * One message substrate for human↔agent and agent↔agent.
@@ -42,6 +43,39 @@ export function deliver(db: Db, input: DeliverInput): { id: string; seq: number 
   });
 }
 
+/**
+ * Deliver to one agent and, if the wake rules say so, wake it — in ONE
+ * transaction. A bump on a separate path is the bug that left agents asleep
+ * with mail in their inbox, exactly as it once left them asleep with a verdict.
+ */
+export function deliverAndWake(
+  db: Db,
+  input: {
+    to: AgentRow;
+    kind: string;
+    author: string;
+    body: string;
+    runId?: string;
+    meta?: unknown;
+    /** What to record as the wake reason if it wakes. */
+    wakeReason: 'human' | 'event';
+  },
+): { id: string; seq: number; woke: boolean } {
+  return tx(db, () => {
+    const msg = deliver(db, {
+      agentId: input.to.id, kind: input.kind, author: input.author, body: input.body,
+      recipients: [`agent:${input.to.slug}`],
+      ...(input.runId ? { runId: input.runId } : {}),
+      ...(input.meta !== undefined ? { meta: input.meta } : {}),
+    });
+    // Re-read inside the transaction: the caller's row may predate a pause.
+    const status = (db.prepare('SELECT status FROM agents WHERE id = ?').get(input.to.id) as { status: string } | undefined)?.status;
+    const woke = status === 'ACTIVE' && shouldWakeOnMessage(input.kind, input.body, input.to.slug);
+    if (woke) bumpWake(db, input.to.id, input.wakeReason);
+    return { ...msg, woke };
+  });
+}
+
 export interface PendingRow {
   id: string;
   agent_id: string;
@@ -50,12 +84,14 @@ export interface PendingRow {
   body: string;
   seq: number;
   meta: string | null;
+  run_id: string | null;
+  created_at: number;
 }
 
 export function pending(db: Db, recipient: string, nowMs = now()): PendingRow[] {
   return db
     .prepare(
-      `SELECT m.id, m.agent_id, m.kind, m.author, m.body, m.seq, m.meta
+      `SELECT m.id, m.agent_id, m.kind, m.author, m.body, m.seq, m.meta, m.run_id, m.created_at
        FROM messages m JOIN message_deliveries d ON d.message_id = m.id
        WHERE d.recipient = ? AND d.state IN ('QUEUED','LEASED')
          AND d.available_at <= ?
@@ -66,22 +102,25 @@ export function pending(db: Db, recipient: string, nowMs = now()): PendingRow[] 
 }
 
 /**
- * Take a lease. A crash before the ack simply lets the lease lapse and the
- * message becomes available again — at-least-once, idempotent by message id.
+ * Take a lease FOR A RUN. A crash before the settle simply lets the lease
+ * lapse and the message becomes available again — at-least-once, idempotent
+ * by message id. The run id is not optional: the settle acks or releases by
+ * it, and a lease nobody owns is a lease nobody settles.
  */
 export function leaseFor(
   db: Db,
   recipient: string,
+  runId: string,
   leaseMs: number,
   nowMs = now(),
 ): PendingRow[] {
   return tx(db, () => {
     const rows = pending(db, recipient, nowMs);
     const stmt = db.prepare(
-      `UPDATE message_deliveries SET state = 'LEASED', lease_until = ?, attempts = attempts + 1
+      `UPDATE message_deliveries SET state = 'LEASED', lease_until = ?, lease_run_id = ?, attempts = attempts + 1
        WHERE message_id = ? AND recipient = ?`,
     );
-    for (const r of rows) stmt.run(nowMs + leaseMs, r.id, recipient);
+    for (const r of rows) stmt.run(nowMs + leaseMs, runId, r.id, recipient);
     return rows;
   });
 }
@@ -98,13 +137,26 @@ export function ackAfterCommit(db: Db, messageId: string, recipient: string): vo
   emit(db, 'message.acked', recipient, { messageId });
 }
 
+/**
+ * A page of the thread. With a cursor (`afterSeq > 0`) it is the next `limit`
+ * rows, for a follower. Without one it is the LAST `limit` rows: a reader
+ * opening the thread wants what happened most recently, and a thread longer
+ * than the page would otherwise never show anything past its first page.
+ */
 export function thread(db: Db, agentId: string, afterSeq = 0, limit = 200): PendingRow[] {
+  let after = afterSeq;
+  if (after <= 0) {
+    const top = db.prepare('SELECT MAX(seq) AS s FROM messages WHERE agent_id = ?').get(agentId) as
+      | { s: number | null }
+      | undefined;
+    after = Math.max(0, (top?.s ?? 0) - limit);
+  }
   return db
     .prepare(
-      `SELECT id, agent_id, kind, author, body, seq, meta FROM messages
+      `SELECT id, agent_id, kind, author, body, seq, meta, run_id, created_at FROM messages
        WHERE agent_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
     )
-    .all(agentId, afterSeq, limit) as PendingRow[];
+    .all(agentId, after, limit) as PendingRow[];
 }
 
 /** The most recent report an agent produced — surfaced everywhere it is named. */

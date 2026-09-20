@@ -42,6 +42,29 @@ export function open(path: string, opts: OpenOptions = {}): Db {
 export const now = (): number => Date.now();
 export const id = (): string => randomUUID();
 
+export interface Event {
+  seq: number;
+  kind: string;
+  actor: string;
+  payload: unknown;
+  subject: string | null;
+}
+type Listener = (e: Event) => void;
+const listeners: Listener[] = [];
+
+/**
+ * In-process fan-out of the authority. The seam for anything that reacts to
+ * the fleet — a push notification, a webhook, a test — without a second
+ * queue to keep consistent. Listeners must not throw and must not emit.
+ */
+export function onEvent(fn: Listener): () => void {
+  listeners.push(fn);
+  return () => {
+    const i = listeners.indexOf(fn);
+    if (i >= 0) listeners.splice(i, 1);
+  };
+}
+
 /**
  * Append to the authority. Everything consequential emits one of these, and
  * every projection is rebuildable from the stream.
@@ -56,7 +79,15 @@ export function emit(
   const info = db
     .prepare('INSERT INTO events(ts,kind,subject,actor,payload) VALUES (?,?,?,?,?)')
     .run(now(), kind, subject ?? null, actor, JSON.stringify(payload ?? {}));
-  return Number(info.lastInsertRowid);
+  const seq = Number(info.lastInsertRowid);
+  for (const l of listeners) {
+    try {
+      l({ seq, kind, actor, payload, subject: subject ?? null });
+    } catch {
+      /* a listener's failure is not the store's */
+    }
+  }
+  return seq;
 }
 
 /** Run `fn` in one IMMEDIATE transaction. Nested calls join the outer one. */

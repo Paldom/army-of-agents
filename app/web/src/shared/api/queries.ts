@@ -9,6 +9,8 @@ export const keys = {
   files: ['files'] as const,
   file: (path: string) => ['file', path] as const,
   agentDocs: (slug: string) => ['agent-docs', slug] as const,
+  thread: (slug: string) => ['thread', slug] as const,
+  doctor: ['doctor'] as const,
 };
 
 /** The workspace polls: the supervisor moves without asking the browser. */
@@ -28,6 +30,24 @@ export const useFile = (path: string | null) =>
 
 export const useAgentDocs = (slug: string | null) =>
   useQuery({ queryKey: keys.agentDocs(slug ?? ''), queryFn: () => api.agentDocs(slug!), enabled: !!slug });
+
+/** A thread is live: REPORT lines land while the turn runs, so it polls faster than the fleet. */
+export const useThread = (slug: string | null) =>
+  useQuery({ queryKey: keys.thread(slug ?? ''), queryFn: () => api.thread(slug!), enabled: !!slug, refetchInterval: 3000 });
+
+/** Subprocess checks on the server side; once a minute is plenty. */
+export const useDoctor = () => useQuery({ queryKey: keys.doctor, queryFn: api.doctor, refetchInterval: 60_000 });
+
+export function useSendMessage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => api.sendMessage(slug, text),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.thread(slug) });
+      void qc.invalidateQueries({ queryKey: keys.state });
+    },
+  });
+}
 
 export function useAnswer() {
   const qc = useQueryClient();

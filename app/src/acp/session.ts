@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 
 import { type AcpEvent, interpret, parseNdjson } from './events.ts';
 
@@ -44,19 +45,75 @@ export interface PromptResult {
 }
 
 export interface Runner {
-  run(args: string[], input?: string): Promise<{ code: number; stdout: string; stderr: string }>;
+  /**
+   * `onOutput` receives stdout as it arrives, so a turn can be read while it
+   * is still running. Raw bytes, not lines: a chunk boundary can fall inside
+   * a multi-byte character, and only the consumer knows how to reassemble.
+   */
+  run(
+    args: string[],
+    input?: string,
+    onOutput?: (chunk: Buffer) => void,
+  ): Promise<{ code: number; stdout: string; stderr: string }>;
 }
+
+/**
+ * Reassemble the text an agent is writing, frame by frame, as it streams.
+ * `onText` fires with the whole text so far whenever a complete new line has
+ * arrived — which is exactly when a REPORT line becomes a line.
+ */
+export function textStream(onText: (textSoFar: string) => void): (chunk: Buffer) => void {
+  const decoder = new StringDecoder('utf8');
+  let carry = '';
+  let text = '';
+  let newlines = 1; // fire on the first completed line, not the first fragment
+  return (chunk) => {
+    carry += decoder.write(chunk);
+    const lines = carry.split('\n');
+    carry = lines.pop() ?? '';
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('{')) continue;
+      try {
+        const u = interpret(JSON.parse(t) as AcpEvent);
+        if (u.kind === 'text') text += u.text;
+      } catch {
+        /* a partial or malformed frame is not worth losing the stream over */
+      }
+    }
+    const count = text.split('\n').length;
+    if (count > newlines) {
+      newlines = count;
+      onText(text);
+    }
+  };
+}
+
+/** The one place the binary is named; the pane and the doctor read the same setting. */
+export const acpxBin = (): string => process.env['AOA_ACPX_BIN'] ?? 'acpx';
 
 /** Real acpx. Injected so the dispatcher is testable without spawning a harness. */
 export const acpxRunner: Runner = {
-  run(args, input) {
+  run(args, input, onOutput) {
     return new Promise((resolve) => {
-      const child = spawn('acpx', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-      let stdout = '';
-      let stderr = '';
-      child.stdout.on('data', (d) => (stdout += d));
-      child.stderr.on('data', (d) => (stderr += d));
-      child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+      const child = spawn(acpxBin(), args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      // Concatenated as bytes and decoded once: appending chunk by chunk
+      // decodes each on its own, and a multi-byte character split across two
+      // chunks came out as two replacement characters.
+      const out: Buffer[] = [];
+      const err: Buffer[] = [];
+      child.stdout.on('data', (d: Buffer) => {
+        out.push(d);
+        onOutput?.(d);
+      });
+      child.stderr.on('data', (d: Buffer) => err.push(d));
+      child.on('close', (code) =>
+        resolve({
+          code: code ?? -1,
+          stdout: Buffer.concat(out).toString('utf8'),
+          stderr: Buffer.concat(err).toString('utf8'),
+        }),
+      );
       if (input !== undefined) child.stdin.write(input);
       child.stdin.end();
     });
@@ -95,7 +152,12 @@ export async function ensureSession(r: Runner, spec: SessionSpec): Promise<boole
 }
 
 /** Structured NDJSON so the workspace can stream a run live rather than scrape it. */
-export async function prompt(r: Runner, spec: SessionSpec, text: string): Promise<PromptResult> {
+export async function prompt(
+  r: Runner,
+  spec: SessionSpec,
+  text: string,
+  onOutput?: (chunk: Buffer) => void,
+): Promise<PromptResult> {
   const args = [
     ...baseArgs(spec),
     '--approve-all',
@@ -108,7 +170,7 @@ export async function prompt(r: Runner, spec: SessionSpec, text: string): Promis
   if (spec.name) args.push('-s', spec.name);
   args.push('-f', '-');
 
-  const res = await r.run(args, text);
+  const res = await r.run(args, text, onOutput);
   return parsePromptOutput(res.stdout, res.code, res.stderr);
 }
 

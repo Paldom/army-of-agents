@@ -12,8 +12,13 @@ import { proposePlan, applyPlan, listPlans, rejectPlan } from '../orchestrator/p
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import * as term from './terminal.ts';
-import { dbPathFor, paneName } from '../supervisor/workspace.ts';
+import { dbPathFor, paneName, stateDir } from '../supervisor/workspace.ts';
 import * as browser from './browser.ts';
+import { doctorCached } from './doctor.ts';
+import { deliverAndWake } from '../supervisor/messages.ts';
+import { installEventHook } from '../supervisor/hooks.ts';
+import { ensureOrchestrator } from '../orchestrator/bootstrap.ts';
+import { loadHarnessesFor } from '../acp/capabilities.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // The built UI. `npm run build` in web/ produces it; dev uses Vite's own server.
@@ -45,12 +50,15 @@ function authorized(req: { headers: Record<string, unknown> }): boolean {
 }
 
 const db = open(dbPath);
+ensureOrchestrator(db);
+installEventHook();
+loadHarnessesFor(projectRoot);
 
 type Handler = (
   body: unknown,
   q: URLSearchParams,
   params: string[],
-) => unknown;
+) => unknown | Promise<unknown>;
 
 const routes: Array<[string, RegExp, Handler]> = [
   ['GET', /^\/api\/state$/, () => ({
@@ -59,7 +67,15 @@ const routes: Array<[string, RegExp, Handler]> = [
     needsYou: api.needsYou(db),
     fleet: api.fleetStatus(db),
     backlog: api.listBacklog(db),
+    notices: api.recentNotices(db),
     orchestrator: api.getAgentBySlug(db, 'orchestrator')?.slug ?? null,
+  })],
+  ['GET', /^\/api\/doctor$/, async () => ({
+    checks: await doctorCached({
+      projectRoot,
+      stateDir: stateDir(projectRoot),
+      orchestratorHarness: api.getAgentBySlug(db, 'orchestrator')?.harness ?? null,
+    }),
   })],
   ['GET', /^\/api\/agents$/, () => api.listAgents(db).map((a) => api.agentView(db, a))],
   ['GET', /^\/api\/agents\/([^/]+)$/, (_b, _q, p) => {
@@ -75,8 +91,12 @@ const routes: Array<[string, RegExp, Handler]> = [
     const a = api.getAgentBySlug(db, p[0]!);
     if (!a) return null;
     const body = b as { text: string; author?: string };
-    return api.appendMessage(db, {
-      agentId: a.id, kind: 'human', author: body.author ?? 'human:owner', body: body.text,
+    if (!body.text?.trim()) return { error: 'empty message' };
+    // Delivered, not merely appended: a human follow-up in an agent's thread
+    // is the one message that wakes it (asymmetric on purpose — see
+    // shouldWakeOnMessage). The precondition then sees the queued delivery.
+    return deliverAndWake(db, {
+      to: a, kind: 'human', author: body.author ?? 'human:owner', body: body.text, wakeReason: 'human',
     });
   }],
   ['GET', /^\/api\/agents\/([^/]+)\/docs$/, (_b, _q, p) => {
@@ -101,6 +121,8 @@ const routes: Array<[string, RegExp, Handler]> = [
       ...(body.policyVersion !== undefined ? { currentPolicyVersion: body.policyVersion } : {}),
     });
   }],
+
+  ['POST', /^\/api\/asks\/([^/]+)\/cancel$/, (_b, _q, p) => api.cancelAsk(db, p[0]!, 'human:owner')],
 
   ['GET', /^\/api\/fleet$/, () => api.fleetStatus(db)],
   ['POST', /^\/api\/agents\/([^/]+)\/activate$/, (_b, _q, p) => {
@@ -195,7 +217,7 @@ const server = createServer(async (req, res) => {
       const m = re.exec(url.pathname);
       if (!m) continue;
       try {
-        const out = handler(body, url.searchParams, m.slice(1) as string[]);
+        const out = await handler(body, url.searchParams, m.slice(1) as string[]);
         return send(out === null ? 404 : 200, out ?? { error: 'not found' });
       } catch (err) {
         return send(500, { error: String(err) });
@@ -236,7 +258,22 @@ server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const tokenOk =
     !REQUIRE_AUTH || url.searchParams.get('token') === TOKEN;
-  if (!tokenOk) {
+  // The agent's browser visits arbitrary pages, and any of them can open a
+  // WebSocket to localhost. A cross-origin upgrade is refused before the
+  // token is even looked at: the terminal socket is a shell. The whole
+  // origin is compared — scheme, host, port — against the request's own
+  // Host, and a client with no Origin at all (not a browser) is admitted only
+  // on the strength of the token, never when auth is off.
+  const host = String(req.headers.host ?? '');
+  const origin = req.headers.origin === undefined ? null : String(req.headers.origin);
+  // Behind a TLS terminator the browser's Origin is the public name while
+  // Host is the internal one; AOA_PUBLIC_ORIGIN names what to accept then.
+  const published = (process.env['AOA_PUBLIC_ORIGIN'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const sameOrigin =
+    origin === null
+      ? REQUIRE_AUTH
+      : origin === `http://${host}` || origin === `https://${host}` || published.includes(origin);
+  if (!tokenOk || !sameOrigin) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
@@ -288,23 +325,66 @@ wssTerminal.on('connection', (ws: WebSocket, _req: IncomingMessage, url: URL) =>
   ws.on('close', () => att.close());
 });
 
-wssBrowser.on('connection', (ws: WebSocket, _req: IncomingMessage, url: URL) => {
+wssBrowser.on('connection', async (ws: WebSocket, _req: IncomingMessage, url: URL) => {
   const slug = url.searchParams.get('agent') ?? '';
   const sess = browser.sessionFor(slug, projectRoot);
-  const avail = browser.stealthAvailable(projectRoot);
+  const worktree = join(stateDir(projectRoot), slug);
+  const avail = browser.stealthAvailable(projectRoot, worktree);
+  const send = (msg: unknown) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+  };
 
-  ws.send(JSON.stringify({ type: 'control', state: sess.control, reason: sess.reason }));
-  if (!avail.ok) {
-    // Say why the viewport is empty rather than showing a dead frame.
-    ws.send(JSON.stringify({ type: 'unavailable', reason: avail.detail }));
+  send({ type: 'control', state: sess.control, reason: sess.reason });
+
+  // Cleanup is registered BEFORE the first await: a socket that closes while
+  // the endpoint is still being attached would otherwise leave a grabber and
+  // its pump running with nobody to send to.
+  let grabber: browser.Grabber | null = null;
+  let pump: browser.FramePump | null = null;
+  let closed = false;
+  ws.on('close', () => {
+    closed = true;
+    pump?.stop();
+    grabber?.close();
+  });
+
+  // Identities live in the directory the agent runs in — its worktree — or
+  // in the project itself; the one named after the agent wins.
+  const ep = browser.discoverCdp([worktree, projectRoot], process.env, slug);
+  grabber = ep ? await browser.cdpGrabber(ep) : null;
+  if (closed) {
+    grabber?.close();
+    return;
   }
+  if (!grabber) {
+    // Say why the viewport is empty rather than showing a dead frame.
+    send({
+      type: 'unavailable',
+      reason: !avail.ok
+        ? avail.detail
+        : ep
+          ? `a DevTools endpoint was found at ${ep.host}:${ep.port} but nothing answered; the browser may have exited`
+          : 'no live browser for this agent: launch its identity with remote debugging on (DevToolsActivePort), or set AOA_BROWSER_CDP=host:port',
+    });
+  }
+  const live = grabber;
+  pump = live ? browser.pumpFrames(() => live.grab(), send) : null;
 
   ws.on('message', (raw: unknown) => {
-    let m: { type?: string; state?: browser.ControlState };
+    let m: { type?: string; state?: browser.ControlState; x?: number; y?: number };
     try { m = JSON.parse(String(raw)); } catch { return; }
     if (m.type === 'control' && m.state) {
       const s = browser.setControl(slug, m.state);
-      ws.send(JSON.stringify({ type: 'control', state: s?.control, reason: s?.reason }));
+      // Persisted, so the supervisor — a different process — can tell the
+      // agent's NEXT turn that a human has the wheel. The turn in flight is
+      // the stealth skill's to stop; this workspace cannot reach inside it.
+      db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)').run(`browser_control:${slug}`, m.state);
+      send({ type: 'control', state: s?.control, reason: s?.reason });
+    } else if (m.type === 'click' && live && typeof m.x === 'number' && typeof m.y === 'number') {
+      // Only a human who took the wheel may drive. The same rule the agent is
+      // held to, in the other direction.
+      if (browser.sessionFor(slug, projectRoot).control !== 'control_taken') return;
+      void live.click(m.x, m.y).catch((err) => send({ type: 'unavailable', reason: String(err).slice(0, 200) }));
     }
   });
 });

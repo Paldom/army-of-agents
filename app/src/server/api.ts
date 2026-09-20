@@ -9,7 +9,7 @@ import {
   lostWakeScan,
   statusOf,
 } from '../supervisor/repo.ts';
-import { answer, ask, openAsks } from '../supervisor/hitl.ts';
+import { answer, ask, cancelAsk, openAsks } from '../supervisor/hitl.ts';
 import { latestReport, thread } from '../supervisor/messages.ts';
 import { isBlockingHuman } from '../supervisor/derived.ts';
 import { HARNESSES } from '../acp/capabilities.ts';
@@ -99,6 +99,19 @@ export function agentView(db: Db, a: AgentRow) {
     // so the label a human copies into `tmux attach` is the real one.
     sessionName: paneName(process.env['AOA_PROJECT_ROOT'] ?? process.cwd(), a.slug),
     liveRun: run ? { id: run.id, state: run.state, startedAt: run.started_at } : null,
+    // Mail waiting for its next turn. Non-zero on an agent that never wakes is
+    // the visible form of a delivery that lost its bump.
+    unread: (
+      db.prepare(
+        `SELECT COUNT(*) AS n FROM message_deliveries WHERE recipient = ? AND state IN ('QUEUED','LEASED')`,
+      ).get(`agent:${a.slug}`) as { n: number }
+    ).n,
+    // Letters that could not be delivered three times. Non-zero is a fault
+    // worth a look, not a status.
+    dead: (
+      db.prepare(`SELECT COUNT(*) AS n FROM message_deliveries WHERE recipient = ? AND state = 'DEAD'`)
+        .get(`agent:${a.slug}`) as { n: number }
+    ).n,
     latestReport: report
       ? { body: report.body, at: report.created_at, runId: report.run_id, seq: report.seq }
       : null,
@@ -162,10 +175,41 @@ export function channels(db: Db): ChannelView[] {
     .prepare(`SELECT value FROM meta WHERE key = 'channels'`)
     .get() as { value: string } | undefined;
   const defined = rows ? (JSON.parse(rows.value) as Array<{ name: string; members: string[] }>) : [];
-  if (defined.length > 0) return defined.map((c) => decorate(db, c));
-  // No channels configured: every agent is its own room. Honest, and it means
-  // the workspace works on a fresh install with nothing set up.
-  return listAgents(db).map((a) => decorate(db, { name: a.slug, members: [a.slug] }));
+  // An agent in no channel is still an agent. Every one gets a room of its
+  // own — which is also what a fresh install with nothing set up looks like —
+  // so the orchestrator, or an agent created at 3am, never falls off the
+  // sidebar for want of a channel row.
+  const filed = new Set(defined.flatMap((c) => c.members));
+  const solo = listAgents(db)
+    .filter((a) => !filed.has(a.slug) && a.status !== 'RETIRED')
+    .map((a) => ({ name: a.slug, members: [a.slug] }));
+  return [...defined, ...solo].map((c) => decorate(db, c));
+}
+
+/** When the loop last ticked, and whether that is recent enough to trust. */
+export function supervisorPulse(db: Db, staleAfterMs = 90_000) {
+  const row = db.prepare(`SELECT value FROM meta WHERE key = 'supervisor_last_tick_at'`).get() as
+    | { value: string }
+    | undefined;
+  const lastTickAt = row ? Number(row.value) : null;
+  return { lastTickAt, alive: lastTickAt !== null && now() - lastTickAt < staleAfterMs };
+}
+
+/**
+ * NOTIFY lines: things agents wanted a human to see without needing an
+ * answer. Quiet by design — they never badge, never block, and are read in
+ * one place rather than hunted across threads.
+ */
+export function recentNotices(db: Db, limit = 20) {
+  return (
+    db
+      .prepare(
+        `SELECT m.id, m.body, m.created_at, m.run_id, a.slug FROM messages m
+         JOIN agents a ON a.id = m.agent_id
+         WHERE m.kind = 'notify' ORDER BY m.created_at DESC LIMIT ?`,
+      )
+      .all(limit) as Array<{ id: string; body: string; created_at: number; run_id: string | null; slug: string }>
+  ).map((r) => ({ id: r.id, agent: r.slug, body: r.body, at: r.created_at, runId: r.run_id }));
 }
 
 export function setChannels(db: Db, chans: Array<{ name: string; members: string[] }>): void {
@@ -227,6 +271,9 @@ export function fleetStatus(db: Db) {
     })),
     // The lost-wake alarm. A silently stalled agent must be visible.
     lostWake: lostWakeScan(db).map((a) => a.slug),
+    // The server cannot wake anyone. Whether anything can is a fact the
+    // workspace has to show, or every status on it is a guess.
+    supervisor: supervisorPulse(db),
     counts: {
       blocksHuman: agents.filter((a) => a.blocksHuman).length,
       running: agents.filter((a) => a.status === 'RUNNING').length,
@@ -397,4 +444,4 @@ export function listAccounts(db: Db, q?: { search?: string; status?: string; dic
   };
 }
 
-export { listAgents, getAgentBySlug, getAgent, thread, answer, ask, createAgent, appendMessage };
+export { listAgents, getAgentBySlug, getAgent, thread, answer, ask, cancelAsk, createAgent, appendMessage };

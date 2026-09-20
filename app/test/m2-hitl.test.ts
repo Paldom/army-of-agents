@@ -183,12 +183,12 @@ test('M2: delivery acks AFTER commit, so a crash redelivers rather than loses', 
     assert.equal(pending(db, `agent:${b.slug}`).length, 1);
 
     // Lease it, then simulate the crash: no ack was written.
-    const leased = leaseFor(db, `agent:${b.slug}`, 30_000);
+    const leased = leaseFor(db, `agent:${b.slug}`, 'run-1', 30_000);
     assert.equal(leased.length, 1);
     assert.equal(leased[0]!.id, m.id);
 
     // After the lease expires the message is available again — at-least-once.
-    const redelivered = leaseFor(db, `agent:${b.slug}`, 30_000, Date.now() + 60_000);
+    const redelivered = leaseFor(db, `agent:${b.slug}`, 'run-2', 30_000, Date.now() + 60_000);
     assert.equal(redelivered.length, 1, 'a crash mid-processing redelivers');
 
     // Only an explicit ack, written after the receiver committed, retires it.

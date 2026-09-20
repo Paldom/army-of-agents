@@ -1,6 +1,6 @@
 ---
 name: army-agent-contract
-description: Writes the session contract for a fleet agent - what it may read, what it may write, what it owns, what it produces, and when it is done - and fixes agents that collide on files or widen their scope. Use for "write a contract for this subagent", "two agents keep touching the same files". Not for starting the fleet, the ask protocol, or merging output.
+description: Writes the session contract for a fleet agent - what it may read, what it may write, what it owns, what it produces, and when it is done - and fixes agents that collide on files or widen their scope. Use for "write a contract for this subagent", "give this agent a proper charter", "two agents keep touching the same files". Not for starting the fleet, the ask protocol, or merging output.
 license: MIT
 ---
 

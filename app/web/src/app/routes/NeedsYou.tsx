@@ -5,10 +5,38 @@ import { ago } from '@/shared/format';
 import type { Ask } from '@/shared/api/types';
 import { Button, Card, CardBody, CardFoot, CardHead, Chip, Empty, Mono, Note } from '@/components/ui/primitives';
 import { cn } from '@/lib';
+import type { Notice } from '@/shared/api/types';
+
+/**
+ * NOTIFY lines: seen, not answered. Quiet on purpose — they never badge and
+ * never sort above an ask, because nothing is waiting on you.
+ */
+function Notices({ notices }: { notices: Notice[] }) {
+  const openAgent = useUi((s) => s.openAgent);
+  if (notices.length === 0) return null;
+  return (
+    <Card className="mt-6" data-testid="notices">
+      <CardBody>
+        <b>Notices</b>
+        <Note className="mb-2 mt-0.5">Things agents wanted you to see. No answer is needed.</Note>
+        <ul className="divide-y divide-border">
+          {notices.map((n) => (
+            <li key={n.id} className="flex items-baseline gap-3 py-1.5 text-[13px]">
+              <Mono className="shrink-0 text-muted-fg">{ago(Date.now() - n.at)}</Mono>
+              <Button variant="ghost" size="sm" className="shrink-0 px-0" onClick={() => openAgent(n.agent)}><b>{n.agent}</b></Button>
+              <span>{n.body}</span>
+            </li>
+          ))}
+        </ul>
+      </CardBody>
+    </Card>
+  );
+}
 
 export function NeedsYou() {
   const { data } = useWorkspace();
   const items = data?.needsYou ?? [];
+  const notices = data?.notices ?? [];
 
   if (items.length === 0) {
     return (
@@ -16,6 +44,7 @@ export function NeedsYou() {
         <h1>Needs you</h1>
         <Empty title="Nothing is waiting on you."
           hint="Agents that are backing off, scheduled or capped are fine — they never appear here." />
+        <Notices notices={notices} />
       </>
     );
   }
@@ -35,6 +64,7 @@ export function NeedsYou() {
         Everything not on this screen is running, capped or idle, and none of it is broken.
       </p>
       <div className="space-y-3.5">{items.map((q) => <AskCard key={q.askId} ask={q} />)}</div>
+      <Notices notices={notices} />
     </>
   );
 }

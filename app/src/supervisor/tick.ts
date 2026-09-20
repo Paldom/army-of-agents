@@ -54,6 +54,12 @@ export interface TickOptions {
    * within minutes of a restart.
    */
   maxInFlight?: number;
+  /**
+   * Slugs considered before everyone else and allowed one turn beyond the
+   * in-flight cap. The orchestrator: a fleet whose judge waits behind six
+   * busy workers cannot be asked anything.
+   */
+  reserved?: string[];
 }
 
 export async function tick(
@@ -72,17 +78,25 @@ export async function tick(
     lostWake: [],
   };
 
-  const agents = db
-    .prepare(`SELECT * FROM agents WHERE status = 'ACTIVE' ORDER BY next_due_at`)
-    .all() as AgentRow[];
+  const reserved = new Set(opts.reserved ?? []);
+  const agents = (
+    db.prepare(`SELECT * FROM agents WHERE status = 'ACTIVE' ORDER BY next_due_at`).all() as AgentRow[]
+  ).sort((a, b) => Number(reserved.has(b.slug)) - Number(reserved.has(a.slug)));
 
   const maxDispatch = opts.maxDispatch ?? 4;
   const maxInFlight = opts.maxInFlight ?? 6;
   // Adopted turns from a previous supervisor count too: they are real sessions
-  // burning real quota, whoever started them.
+  // burning real quota, whoever started them. Reserved agents are outside the
+  // ordinary accounting in both directions: their turns do not take a
+  // worker's slot, and a full fleet does not stop them.
   let inFlight = (
-    db.prepare("SELECT COUNT(*) AS n FROM runs WHERE state NOT IN ('continue','completed','failed')").get() as
-      { n: number }
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM runs r JOIN agents a ON a.id = r.agent_id
+         WHERE r.state NOT IN ('continue','completed','failed')
+           AND a.slug NOT IN (${[...reserved].map(() => '?').join(',') || "''"})`,
+      )
+      .get(...reserved) as { n: number }
   ).n;
 
   // Selection is sequential — it takes the store's single-writer boundary and
@@ -97,7 +111,7 @@ export async function tick(
     result.considered++;
 
     if (result.dispatched >= maxDispatch) break;
-    if (inFlight >= maxInFlight) {
+    if (!reserved.has(agent.slug) && inFlight >= maxInFlight) {
       result.skippedResource++;
       break;
     }
@@ -137,7 +151,7 @@ export async function tick(
     }
 
     result.dispatched++;
-    inFlight++;
+    if (!reserved.has(agent.slug)) inFlight++;
     dispatches.push(runOne(db, dispatcher, agent, run.id, opts.jitter ?? 0));
   }
 
@@ -149,6 +163,8 @@ export async function tick(
   if (result.lostWake.length > 0) {
     emit(db, 'alarm.lost_wake', 'system', { agents: result.lostWake });
   }
+  // The server cannot wake anyone. This is how it knows whether anything can.
+  db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('supervisor_last_tick_at', ?)`).run(String(nowMs));
   return result;
 }
 

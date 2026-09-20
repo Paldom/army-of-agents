@@ -5,6 +5,9 @@ import { type AgentRow } from './repo.ts';
 import { type Outcome } from './state.ts';
 import { ask } from './hitl.ts';
 import { parseAsks, parseOutcome } from './protocol.ts';
+import { fileTurnReport, ingestMarkers } from './report.ts';
+
+export const MAX_ASKS_PER_TURN = 10;
 import { settle } from './budget.ts';
 import { gateVendor } from './tick.ts';
 
@@ -41,13 +44,24 @@ export function applyResult(
     return 'RETRYABLE_ERROR';
   }
 
+  // What the agent said this turn, filed before anything else can fail. The
+  // streamed path already landed most REPORT lines; this is idempotent, so
+  // the same call finalises a turn the reconciler found after a restart.
+  // A turn that exited non-zero still informs — its REPORT lines and its
+  // text are real — but it does not act: a SEND or PROPOSE from a turn the
+  // loop is about to retry would be repeated by the retry under a new run
+  // id, past the dedupe.
+  ingestMarkers(db, agent, runId, res.text, { actions: res.ok });
+  fileTurnReport(db, agent, runId, res.text);
+
   if (res.tokens) settle(db, agent.id, 1, runId);
   if (!res.ok) return 'RETRYABLE_ERROR';
 
   // Questions the agent filed this turn become real asks in its thread. This
   // is the whole point of the system: the agent ends its turn, and the owner
   // answers in the workspace rather than in a markdown file.
-  for (const a of parseAsks(res.text)) {
+  // A turn that asks more than this is not asking, it is looping.
+  for (const a of parseAsks(res.text).slice(0, MAX_ASKS_PER_TURN)) {
     ask(db, {
       agentId: agent.id,
       runId,

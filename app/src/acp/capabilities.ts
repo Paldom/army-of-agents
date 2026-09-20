@@ -1,3 +1,8 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { stateDir } from '../supervisor/workspace.ts';
+
 /**
  * The harness capability record.
  *
@@ -31,6 +36,8 @@ export interface HarnessCapability {
   effortConfig: boolean;
   /** How it asks a human for permission. */
   elicitation: 'none' | 'sse-permission' | 'approval-mirror';
+  /** The vendor CLI binary the doctor looks for on PATH; defaults to the acpx agent token. */
+  cli?: string;
   notes?: string;
 }
 
@@ -44,6 +51,7 @@ export const HARNESSES: Record<string, HarnessCapability> = {
     id: 'claude',
     acpxAgent: 'claude',
     vendor: 'claude',
+    cli: 'claude',
     steering: false,
     liveQueue: true,
     interrupt: true,
@@ -61,6 +69,7 @@ export const HARNESSES: Record<string, HarnessCapability> = {
     id: 'codex',
     acpxAgent: 'codex',
     vendor: 'codex',
+    cli: 'codex',
     steering: false,
     liveQueue: true,
     interrupt: true,
@@ -72,19 +81,19 @@ export const HARNESSES: Record<string, HarnessCapability> = {
     elicitation: 'sse-permission',
   },
   gemini: {
-    id: 'gemini', acpxAgent: 'gemini', vendor: 'antigravity',
+    id: 'gemini', acpxAgent: 'gemini', vendor: 'antigravity', cli: 'gemini',
     steering: false, liveQueue: false, interrupt: true, subagents: false,
     resume: 'cold', forkHistory: 'none', systemPromptOverride: false,
     effortConfig: false, elicitation: 'sse-permission',
   },
   grok: {
-    id: 'grok', acpxAgent: 'grok-build', vendor: 'grok',
+    id: 'grok', acpxAgent: 'grok-build', vendor: 'grok', cli: 'grok',
     steering: false, liveQueue: false, interrupt: true, subagents: false,
     resume: 'cold', forkHistory: 'none', systemPromptOverride: false,
     effortConfig: false, elicitation: 'sse-permission',
   },
   kimi: {
-    id: 'kimi', acpxAgent: 'kimi', vendor: 'kimi',
+    id: 'kimi', acpxAgent: 'kimi', vendor: 'kimi', cli: 'kimi',
     steering: false, liveQueue: false, interrupt: true, subagents: false,
     resume: 'cold', forkHistory: 'none', systemPromptOverride: false,
     effortConfig: false, elicitation: 'sse-permission',
@@ -93,6 +102,49 @@ export const HARNESSES: Record<string, HarnessCapability> = {
 
 export function capabilityOf(harnessId: string | null): HarnessCapability | undefined {
   return harnessId ? HARNESSES[harnessId] : undefined;
+}
+
+/**
+ * Rows, not code. `harnesses.json` beside the store adds or overrides entries,
+ * so a new acpx adapter — or a corrected capability — is a config change:
+ *
+ *   { "opencode": { "acpxAgent": "opencode", "vendor": "opencode", "interrupt": true } }
+ *
+ * Anything unstated is declared false, for the same reason as the seed table:
+ * degrading explicitly is cheaper than hanging.
+ */
+export function loadHarnessOverrides(path: string | undefined): string[] {
+  if (!path || !existsSync(path)) return [];
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, Partial<HarnessCapability>>;
+  const loaded: string[] = [];
+  for (const [key, patch] of Object.entries(raw)) {
+    const base: HarnessCapability = HARNESSES[key] ?? {
+      id: key, acpxAgent: key, vendor: key,
+      steering: false, liveQueue: false, interrupt: false, subagents: false,
+      resume: 'none', forkHistory: 'none', systemPromptOverride: false,
+      effortConfig: false, elicitation: 'none',
+    };
+    HARNESSES[key] = { ...base, ...patch, id: key };
+    loaded.push(key);
+  }
+  return loaded;
+}
+
+/**
+ * Called by each entry point once it knows the project. Not at import: a
+ * module that reads the environment while being loaded is a module whose
+ * behaviour depends on import order.
+ */
+export function loadHarnessesFor(projectRoot: string): string[] {
+  const path = process.env['AOA_HARNESSES_FILE'] ?? join(stateDir(projectRoot), 'harnesses.json');
+  try {
+    return loadHarnessOverrides(path);
+  } catch (err) {
+    // A malformed file must not take the loop down with it; the seed table
+    // still stands and the doctor is where to look.
+    process.stderr.write(`harnesses.json ignored: ${String(err)}\n`);
+    return [];
+  }
 }
 
 /**

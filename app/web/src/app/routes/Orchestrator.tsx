@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useOrchestrator, usePlans, useWorkspace } from '@/shared/api/queries';
 import type { Plan } from '@/shared/api/types';
-import { Button, Card, CardBody, CardFoot, CardHead, Chip, Empty, Mono, Note } from '@/components/ui/primitives';
+import { Button, Card, CardBody, CardFoot, CardHead, Chip, Empty, Mono, Note, StatusChip } from '@/components/ui/primitives';
+import { ThreadView } from '@/app/agent/ThreadView';
 
 export function Orchestrator() {
   const [text, setText] = useState('');
@@ -25,15 +26,22 @@ export function Orchestrator() {
         contracts or capacity it writes the exact plan and waits for <b className="text-fg">Apply</b>.
       </p>
 
-      {orch && (
-        <Card className="mb-4">
+      {orch ? (
+        <Card className="mb-4" data-testid="orc-status">
           <CardBody className="flex flex-wrap items-baseline gap-x-6 gap-y-1.5">
+            <StatusChip status={orch.status} />
             <span><Mono>doing now</Mono>{' '}{orch.liveRun ? `run in ${orch.liveRun.state}` : orch.why}</span>
-            {orch.latestReport && (
-              <span><Mono>last report</Mono>{' '}{orch.latestReport.body.slice(0, 90)}</span>
+            {orch.unread > 0 && <span><Mono>{orch.unread} unread</Mono> waiting for its next turn</span>}
+            {orch.harness && <span><Mono>harness</Mono>{' '}{orch.harness}</span>}
+            {state?.fleet.supervisor.alive === false && (
+              <span className="text-blocker">The supervisor is not ticking; nothing can wake it until it is started.</span>
             )}
           </CardBody>
         </Card>
+      ) : (
+        <Card tone="blocker" className="mb-4"><CardBody>
+          No orchestrator row yet. Both the workspace and the supervisor create it on start; restart either.
+        </CardBody></Card>
       )}
 
       <Card className="mb-5">
@@ -62,6 +70,17 @@ export function Orchestrator() {
               onApply={() => apply.mutate(p.id)} onReject={() => reject.mutate(p.id)} />
           ))}
         </div>
+      )}
+
+      {orch && (
+        <>
+          <h2 className="mb-2 mt-8 text-[15px] font-semibold">Conversation</h2>
+          <Note className="mb-3">
+            Questions go to the orchestrator session and are answered here on its next turn.
+            Its PROPOSE lines become the plan cards above.
+          </Note>
+          <ThreadView slug={orch.slug} composer={false} />
+        </>
       )}
     </>
   );

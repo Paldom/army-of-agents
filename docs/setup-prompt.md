@@ -15,7 +15,7 @@ ORDER — each step depends on the one before it:
 
 3. army-agent-contract. Write a contract for each agent: reads, writes, owns, produces, done_when. Write allowlists MUST be disjoint across agents that can run at the same time — check this mechanically and fix the contract, not the schedule. Make done_when checkable by something other than the agent's own opinion.
 
-4. army-run. Start the supervisor and the workspace. Verify by watching one agent go through a full cycle: due, precondition, dispatch, outcome, next wake. If the precondition returns false, that is a correct idle tick, not a fault.
+4. army-run. Start the supervisor and the workspace. Read the Doctor on the Status screen (or `./scripts/aoa doctor`) before anything else: a turn that cannot start usually fails one of its checks. Then verify by watching one agent go through a full cycle: due, precondition, dispatch, outcome, next wake. If the precondition returns false, that is a correct idle tick, not a fault. Confirm a REPORT line the agent writes mid-turn appears in its thread before the turn ends.
 
 5. army-hitl. Make one agent ask me a real question and confirm the whole path: it releases its session, I answer later, and the next dispatch carries the verdict. Confirm that answering bumps the wake in the same transaction.
 

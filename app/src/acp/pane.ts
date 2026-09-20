@@ -35,6 +35,16 @@ if (!jobDir) {
 
 const argv = JSON.parse(readFileSync(join(jobDir, 'argv.json'), 'utf8')) as string[];
 const input = readFileSync(join(jobDir, 'input.txt'), 'utf8');
+// The pane's shell has the tmux SERVER's environment, not the supervisor's:
+// a PATH that finds acpx there is not guaranteed here. The runner writes
+// what the turn needs, and it wins over whatever the shell had.
+let jobEnv: Record<string, string> = {};
+try {
+  jobEnv = JSON.parse(readFileSync(join(jobDir, 'env.json'), 'utf8')) as Record<string, string>;
+} catch {
+  /* no env.json: the shell's own environment is all there is */
+}
+const acpxBin = jobEnv['AOA_ACPX_BIN'] ?? 'acpx';
 const capture = createWriteStream(join(jobDir, 'stdout.ndjson'));
 
 /**
@@ -96,7 +106,9 @@ function render(frame: Record<string, unknown>): void {
 // `detached` makes the child a process-group leader, so one kill takes acpx
 // AND the harness it spawned. Killing only the acpx pid leaves the real
 // `claude-agent-acp` running and still holding the session's queue.
-const child = spawn('acpx', argv, { stdio: ['pipe', 'pipe', 'inherit'], detached: true });
+const child = spawn(acpxBin, argv, {
+  stdio: ['pipe', 'pipe', 'inherit'], detached: true, env: { ...process.env, ...jobEnv },
+});
 
 // Recorded before the first beat so a reconciler always has something to kill,
 // even if this process dies in the next millisecond.

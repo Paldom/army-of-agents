@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type Db, emit, now } from '../store/db.ts';
+import { type Db, appendMessage, emit, now } from '../store/db.ts';
 import { isAlive, killTurn, readHeartbeat } from '../acp/tmux-runner.ts';
 import { parsePromptOutput } from '../acp/session.ts';
 import { getAgent, type RunRow, succeed, unfinishedRuns } from './repo.ts';
 import { applyResult } from './outcome.ts';
+import { ingestMarkers } from './report.ts';
 
 /**
  * Reconcile turns that outlived the supervisor.
@@ -74,6 +75,10 @@ export function reconcile(db: Db, nowMs = now()): Reconciliation {
     if (isAlive(hb, nowMs)) {
       // Adopted runs are left EXACTLY as they are: still open, still leased by
       // the one-live-run index, so the scheduler will not dispatch over them.
+      // Their REPORT lines still land, though: nobody is polling this job, so
+      // this tick reads what the pane has written so far. Idempotent, so
+      // reading it again next tick files nothing twice.
+      tailAdopted(db, run, job);
       emit(db, 'run.adopted', 'system', { runId: run.id, phase: hb?.phase, bytes: hb?.bytes }, run.agent_id);
       out.adopted.push(run.id);
       continue;
@@ -118,9 +123,27 @@ function finalise(db: Db, run: RunRow, job: string, exitFile: string): void {
   emit(db, 'run.finalised_after_restart', 'system', { runId: run.id, outcome }, run.agent_id);
 }
 
+function tailAdopted(db: Db, run: RunRow, job: string): void {
+  const agent = getAgent(db, run.agent_id);
+  const capturePath = join(job, 'stdout.ndjson');
+  if (!agent || !existsSync(capturePath)) return;
+  try {
+    const text = parsePromptOutput(readFileSync(capturePath, 'utf8'), 0).text;
+    ingestMarkers(db, agent, run.id, text, { partial: true });
+  } catch (err) {
+    emit(db, 'run.stream_error', 'system', { runId: run.id, error: String(err) }, run.agent_id);
+  }
+}
+
 function settle(db: Db, run: RunRow, reason: string): void {
   // RETRYABLE_ERROR, not a failure of the agent: nothing about the work was
   // wrong, the process supervising it went away.
   succeed(db, run.id, 'RETRYABLE_ERROR', { nowMs: now(), toState: 'failed' });
+  // Said in the thread, not only in the event log: a run that vanished with
+  // no trace reads as an agent that never worked.
+  appendMessage(db, {
+    agentId: run.agent_id, kind: 'event', author: 'system', runId: run.id,
+    body: `Run ended without a result (${reason}); it will be retried.`,
+  });
   emit(db, 'run.reconciled', 'system', { runId: run.id, reason }, run.agent_id);
 }

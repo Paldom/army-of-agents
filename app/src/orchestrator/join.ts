@@ -1,5 +1,6 @@
-import { type Db, appendMessage, emit, id, now } from '../store/db.ts';
+import { type Db, emit, id, now } from '../store/db.ts';
 import { getAgentBySlug } from '../supervisor/repo.ts';
+import { deliverAndWake } from '../supervisor/messages.ts';
 
 /**
  * M5 — cross-harness participation.
@@ -147,12 +148,17 @@ export function submitResult(
   const target = g.agentSlug ? getAgentBySlug(db, g.agentSlug) : getAgentBySlug(db, 'orchestrator');
   if (!target) return { ok: false, reason: 'forbidden', detail: 'no target thread' };
 
-  appendMessage(db, {
-    agentId: target.id,
+  // Delivered to the target's inbox AND addressed to it, so it wakes: the
+  // result is the thing the target was waiting on, and mail that is never
+  // read is not data, it is a lost letter. Still untrusted: it carries no
+  // authority and satisfies no gate.
+  deliverAndWake(db, {
+    to: target,
     kind: 'agent_to_agent',
     author: `joined:${identity}`,
-    body,
+    body: `@${target.slug} ${body}`,
     meta: { role: g.role, trust: 'untrusted', joined: true },
+    wakeReason: 'event',
   });
   g.used = 1;
   save(db, grants);

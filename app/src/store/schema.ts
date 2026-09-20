@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS message_deliveries (
   state        TEXT NOT NULL,            -- QUEUED|LEASED|ACKED|DEAD
   available_at INTEGER NOT NULL,
   lease_until  INTEGER,
+  lease_run_id TEXT,                      -- the run that holds the lease; settled by that run only
   attempts     INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (message_id, recipient)
 );
@@ -164,6 +165,9 @@ CREATE TABLE IF NOT EXISTS approval_requests (
   answer         TEXT,
   answered_by    TEXT,
   answered_at    INTEGER,
+  -- Set when a run that was dispatched with this verdict completed. Until
+  -- then the verdict is work the agent still owes a turn to.
+  consumed_at    INTEGER,
   expires_at     INTEGER,
   -- 1 when this came from a file with no per-item timestamp, so its age is
   -- unknown rather than zero. Showing seconds for a question open since July
@@ -288,4 +292,6 @@ CREATE TABLE IF NOT EXISTS meta (
 export const ADDITIVE_MIGRATIONS: string[] = [
   'ALTER TABLE runs ADD COLUMN job_dir TEXT',
   'ALTER TABLE approval_requests ADD COLUMN imported INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE message_deliveries ADD COLUMN lease_run_id TEXT',
+  'ALTER TABLE approval_requests ADD COLUMN consumed_at INTEGER',
 ];

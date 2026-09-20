@@ -1,6 +1,7 @@
 import { type Db, appendMessage, emit, id, now, tx } from '../store/db.ts';
 import { type AgentRow, createAgent, getAgentBySlug, listAgents } from '../supervisor/repo.ts';
 import { addBacklogItem, channels, rerankBacklog } from '../server/api.ts';
+import { deliverAndWake } from '../supervisor/messages.ts';
 import { DEFAULT_CONTINUOUS } from '../supervisor/wake.ts';
 
 /**
@@ -20,7 +21,8 @@ export type EffectKind =
   | 'retire_agent'
   | 'create_agent'
   | 'add_backlog_item'
-  | 'rerank_backlog';
+  | 'rerank_backlog'
+  | (string & {});
 
 export interface Effect {
   kind: EffectKind;
@@ -62,20 +64,29 @@ export function listPlans(db: Db): Plan[] {
   return loadPlans(db).slice().reverse();
 }
 
+export interface ParsedRequest {
+  summary: string;
+  effects: Effect[];
+  investigation: string | null;
+  /** True when the request named a change this vocabulary refuses outright. */
+  refused?: boolean;
+}
+
 /**
- * Turn a request into a plan.
+ * Turn a request into effects, without persisting anything.
  *
  * This is a deterministic intent parser, not a model call. That is deliberate:
  * the supervisor must be able to state effects without a live LLM context, and
  * a plan the owner approves has to mean exactly what it says. The judgement
- * session composes richer plans by calling the same effect vocabulary.
+ * session composes plans by writing PROPOSE lines in this same vocabulary.
  */
-export function proposePlan(db: Db, request: string, by: string): Plan {
+export function parseRequest(db: Db, request: string): ParsedRequest {
   const text = request.trim();
   const lower = text.toLowerCase();
   const effects: Effect[] = [];
   let investigation: string | null = null;
   let summary = 'No fleet change required.';
+  let refused = false;
 
   const agents = listAgents(db);
   const named = agents.filter((a) => new RegExp(`\\b${a.slug}\\b`, 'i').test(text));
@@ -121,8 +132,18 @@ export function proposePlan(db: Db, request: string, by: string): Plan {
       });
     }
   } else if (retireMatch && targets.length > 0) {
-    summary = `Retire ${targets.length} agent(s).`;
-    for (const a of targets) {
+    // The orchestrator is the one agent the fleet cannot do without: retiring
+    // it would leave nobody to ask for the next change. Pause it if you must.
+    const retirable = targets.filter((a) => a.slug !== 'orchestrator');
+    summary = `Retire ${retirable.length} agent(s).${
+      retirable.length < targets.length ? ' The orchestrator cannot be retired; pause it instead.' : ''
+    }`;
+    if (retirable.length === 0) {
+      refused = true;
+      summary = 'The orchestrator cannot be retired; pause it instead.';
+      investigation = summary;
+    }
+    for (const a of retirable) {
       effects.push({
         kind: 'retire_agent',
         describe: `${a.slug} is retired. Its history and reports remain readable; it will never run again.`,
@@ -160,6 +181,24 @@ export function proposePlan(db: Db, request: string, by: string): Plan {
     // it must not require approval.
     investigation = investigate(db, text);
   }
+  return { summary, effects, investigation, ...(refused ? { refused: true } : {}) };
+}
+
+export function proposePlan(
+  db: Db,
+  request: string,
+  by: string,
+  opts: { runId?: string } = {},
+): Plan {
+  // One transaction: the plan and the thread messages that make a replay
+  // recognise it land together, and two processes proposing at once cannot
+  // lose each other's plan in the shared list.
+  return tx(db, () => proposeInTx(db, request, by, opts));
+}
+
+function proposeInTx(db: Db, request: string, by: string, opts: { runId?: string }): Plan {
+  const text = request.trim();
+  const { summary, effects, investigation, refused } = parseRequest(db, text);
 
   const plan: Plan = {
     id: id(),
@@ -177,16 +216,44 @@ export function proposePlan(db: Db, request: string, by: string): Plan {
 
   const orch = getAgentBySlug(db, 'orchestrator');
   if (orch) {
-    appendMessage(db, {
-      agentId: orch.id, kind: 'human', author: by, body: text,
-    });
-    appendMessage(db, {
-      agentId: orch.id,
-      kind: 'agent',
-      author: 'agent:orchestrator',
-      body: investigation ?? summary,
-      meta: { planId: plan.id, effects: plan.effects.length },
-    });
+    if (by.startsWith('agent:')) {
+      // The judgement session proposed. Its line and the resulting card, in
+      // its own thread, so the owner sees the reasoning next to the plan.
+      appendMessage(db, {
+        agentId: orch.id, kind: 'agent', author: by, body: text,
+        ...(opts.runId ? { runId: opts.runId } : {}), meta: { planId: plan.id },
+      });
+      appendMessage(db, {
+        agentId: orch.id, kind: 'event', author: 'system',
+        body: `${summary} Awaiting Apply.`, meta: { planId: plan.id, effects: effects.length },
+      });
+    } else if (refused) {
+      // A command this vocabulary refuses. Said back; not forwarded to the
+      // judgement session as if it were a question.
+      appendMessage(db, { agentId: orch.id, kind: 'human', author: by, body: text, meta: { planId: plan.id } });
+      appendMessage(db, {
+        agentId: orch.id, kind: 'event', author: 'system', body: summary, meta: { planId: plan.id, refused: true },
+      });
+    } else if (effects.length === 0) {
+      // A question, not a command. The canned readout goes out at once, and
+      // the same words reach the judgement session as its next inbox message,
+      // so the answer that matters arrives in this thread on its next wake.
+      deliverAndWake(db, {
+        to: orch, kind: 'human', author: by, body: text, meta: { planId: plan.id }, wakeReason: 'human',
+      });
+      appendMessage(db, {
+        agentId: orch.id, kind: 'event', author: 'system', body: investigation ?? summary,
+        meta: { planId: plan.id },
+      });
+    } else {
+      appendMessage(db, {
+        agentId: orch.id, kind: 'human', author: by, body: text, meta: { planId: plan.id },
+      });
+      appendMessage(db, {
+        agentId: orch.id, kind: 'agent', author: 'agent:orchestrator', body: summary,
+        meta: { planId: plan.id, effects: effects.length },
+      });
+    }
   }
   emit(db, 'plan.proposed', by, { planId: plan.id, effects: effects.length });
   return plan;
@@ -207,9 +274,84 @@ function investigate(db: Db, text: string): string {
   return (
     `${agents.length} agent(s) registered. ` +
     `Ask me to pause, resume, retire or create an agent, add a backlog item, or re-rank the queue — ` +
-    `anything that changes the fleet comes back as a plan you approve first.`
+    `anything that changes the fleet comes back as a plan you approve first. ` +
+    `Your message has been passed to the orchestrator session; its answer lands in its thread.`
   );
 }
+
+/**
+ * What each effect does when applied. A registry rather than a switch so a
+ * new verb is one `registerEffect` call — from another module, or from a
+ * workload adapter — without editing this file.
+ */
+export type EffectApplier = (db: Db, args: Record<string, unknown>, by: string) => void;
+
+const EFFECTS = new Map<EffectKind, EffectApplier>();
+
+export function registerEffect(kind: EffectKind, apply: EffectApplier): void {
+  // Replacing silently is how a workload adapter would change what "pause"
+  // means without anyone noticing.
+  if (EFFECTS.has(kind)) throw new Error(`effect '${kind}' is already registered`);
+  EFFECTS.set(kind, apply);
+}
+
+registerEffect('pause_agent', (db, args) => {
+  const a = getAgentBySlug(db, String(args['slug']));
+  if (a) {
+    db.prepare(
+      `UPDATE agents SET status='PAUSED', next_due_at=NULL, updated_at=?, version=version+1 WHERE id=?`,
+    ).run(now(), a.id);
+  }
+});
+registerEffect('resume_agent', (db, args) => {
+  const a = getAgentBySlug(db, String(args['slug']));
+  if (a) {
+    db.prepare(
+      `UPDATE agents SET status='ACTIVE', next_due_at=?, wake_reason='human', updated_at=?, version=version+1 WHERE id=?`,
+    ).run(now(), now(), a.id);
+  }
+});
+registerEffect('retire_agent', (db, args) => {
+  const a = getAgentBySlug(db, String(args['slug']));
+  // Enforced here, not only when parsing: a plan written by hand or before
+  // this rule existed must not be able to retire the fleet's judge.
+  if (a && a.slug !== 'orchestrator') {
+    db.prepare(
+      `UPDATE agents SET status='RETIRED', next_due_at=NULL, updated_at=?, version=version+1 WHERE id=?`,
+    ).run(now(), a.id);
+    // Cascade: a retired parent retires its descendants.
+    db.prepare(`UPDATE agents SET status='RETIRED', next_due_at=NULL WHERE parent_agent_id=?`).run(a.id);
+  }
+});
+registerEffect('create_agent', (db, args) => {
+  const slug = String(args['slug']);
+  if (!getAgentBySlug(db, slug)) {
+    createAgent(db, {
+      slug,
+      displayName: slug,
+      mission: String(args['mission'] ?? ''),
+      wake: DEFAULT_CONTINUOUS,
+      createdBy: 'agent:orchestrator',
+      // Propose, don't activate. A human enables every agent that gets a row.
+      status: 'DRAFT',
+    });
+  }
+});
+registerEffect('add_backlog_item', (db, args) => {
+  addBacklogItem(db, {
+    title: String(args['title']),
+    question: String(args['question']),
+    raisedBy: 'agent:orchestrator',
+  });
+});
+registerEffect('rerank_backlog', (db) => {
+  const rows = db.prepare(`SELECT id, created_at FROM backlog_items WHERE state='OPEN'`).all() as Array<{
+    id: string; created_at: number;
+  }>;
+  const scores: Record<string, number> = {};
+  for (const r of rows) scores[r.id] = (now() - r.created_at) / 3_600_000;
+  rerankBacklog(db, scores);
+});
 
 export function applyPlan(db: Db, planId: string, by: string): { ok: boolean; error?: string; plan?: Plan } {
   return tx(db, () => {
@@ -218,72 +360,12 @@ export function applyPlan(db: Db, planId: string, by: string): { ok: boolean; er
     if (!plan) return { ok: false, error: 'no such plan' };
     if (plan.state !== 'PENDING') return { ok: false, error: `already ${plan.state}` };
 
-    for (const e of plan.effects) {
-      switch (e.kind) {
-        case 'pause_agent': {
-          const a = getAgentBySlug(db, String(e.args['slug']));
-          if (a) {
-            db.prepare(
-              `UPDATE agents SET status='PAUSED', next_due_at=NULL, updated_at=?, version=version+1 WHERE id=?`,
-            ).run(now(), a.id);
-          }
-          break;
-        }
-        case 'resume_agent': {
-          const a = getAgentBySlug(db, String(e.args['slug']));
-          if (a) {
-            db.prepare(
-              `UPDATE agents SET status='ACTIVE', next_due_at=?, wake_reason='human', updated_at=?, version=version+1 WHERE id=?`,
-            ).run(now(), now(), a.id);
-          }
-          break;
-        }
-        case 'retire_agent': {
-          const a = getAgentBySlug(db, String(e.args['slug']));
-          if (a) {
-            db.prepare(
-              `UPDATE agents SET status='RETIRED', next_due_at=NULL, updated_at=?, version=version+1 WHERE id=?`,
-            ).run(now(), a.id);
-            // Cascade: a retired parent retires its descendants.
-            db.prepare(
-              `UPDATE agents SET status='RETIRED', next_due_at=NULL WHERE parent_agent_id=?`,
-            ).run(a.id);
-          }
-          break;
-        }
-        case 'create_agent': {
-          const slug = String(e.args['slug']);
-          if (!getAgentBySlug(db, slug)) {
-            createAgent(db, {
-              slug,
-              displayName: slug,
-              mission: String(e.args['mission'] ?? ''),
-              wake: DEFAULT_CONTINUOUS,
-              createdBy: 'agent:orchestrator',
-              // Propose, don't activate. A human enables every agent that gets a row.
-              status: 'DRAFT',
-            });
-          }
-          break;
-        }
-        case 'add_backlog_item':
-          addBacklogItem(db, {
-            title: String(e.args['title']),
-            question: String(e.args['question']),
-            raisedBy: 'agent:orchestrator',
-          });
-          break;
-        case 'rerank_backlog': {
-          const rows = db.prepare(`SELECT id, created_at FROM backlog_items WHERE state='OPEN'`).all() as Array<{
-            id: string; created_at: number;
-          }>;
-          const scores: Record<string, number> = {};
-          for (const r of rows) scores[r.id] = (now() - r.created_at) / 3_600_000;
-          rerankBacklog(db, scores);
-          break;
-        }
-      }
-    }
+    // Validated before anything mutates: an effect nobody registered refuses
+    // the whole plan, and refuses it BEFORE the first effect ran, so a plan
+    // never half-applies and stays pending.
+    const missing = plan.effects.find((e) => !EFFECTS.has(e.kind));
+    if (missing) return { ok: false, error: `no applier registered for effect '${missing.kind}'` };
+    for (const e of plan.effects) EFFECTS.get(e.kind)!(db, e.args, by);
 
     plan.state = 'APPLIED';
     plan.appliedAt = now();

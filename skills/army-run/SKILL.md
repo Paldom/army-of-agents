@@ -1,6 +1,6 @@
 ---
 name: army-run
-description: Starts and operates a continuously running agent fleet - the supervisor loop plus the web workspace - and diagnoses a loop that is not dispatching or an agent that stopped waking. Use for "start the agent army", "run the orchestrator loop", "the supervisor isn't dispatching". Not for writing contracts, the ask protocol, adapting a project, or merging output.
+description: Starts and operates a continuously running agent fleet - supervisor loop plus web workspace - and diagnoses a loop that is not dispatching or an agent that stopped waking. Use for "start the agent army", "bring up army-of-agents", "launch the continuous agent system", "the supervisor isn't dispatching". Not for contracts, the ask protocol, adapting a project, or merging output.
 license: MIT
 ---
 
@@ -35,6 +35,21 @@ The workspace prints its URL and an auth token. Open
 screen look busy. Create them through the orchestrator, which proposes and waits
 (`army-agent-contract`).
 
+**The orchestrator is never missing.** Both processes create its row on start
+if the store has none: active, woken by messages, on the harness named by
+`AOA_ORCHESTRATOR_HARNESS` (default `claude`). It is considered before every
+other agent and keeps one dispatch slot beyond `AOA_MAX_IN_FLIGHT`, so a busy
+fleet cannot make it unreachable. It cannot be retired; pause it instead.
+
+## Read the doctor first
+
+`./scripts/aoa doctor <project>` (or Status in the workspace) runs the LLM-free
+checks: node, acpx, each harness CLI on PATH, tmux, node-pty, git, the state
+directory, the browser toolchain, voice, the event hook, and whether the
+orchestrator's harness matches the environment. Optional pieces show as `off`
+with what turning them on changes. A turn that cannot start usually fails one
+of these, and none of them is an agent's fault.
+
 ## What the loop actually does each tick
 
 ```
@@ -61,6 +76,9 @@ The outcome vocabulary is the whole scheduler:
 
 Work down this list. Most of it is not a fault.
 
+0. **Is the loop ticking?** Status shows the supervisor's last tick and a red
+   banner when it is stale. The workspace records answers and messages
+   without it, but nothing wakes until it runs.
 1. **Is anything due?** An agent with `next_due_at` in the future is scheduled,
    not stuck. An agent with `next_due_at` NULL is one of four different things —
    read `wake_reason` to tell them apart. `human` means blocked on you;

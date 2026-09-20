@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { type Db, appendMessage, emit, id, now, tx } from '../store/db.ts';
-import { bumpWake, getAgent } from './repo.ts';
+import { bumpWake, getAgent, releaseWaitingRun } from './repo.ts';
 
 /**
  * Human-in-the-loop, as durable rows.
@@ -115,7 +115,13 @@ export function ask(db: Db, input: AskInput): AskRow {
       input.imported ? 1 : 0,
       now(),
     );
-    emit(db, 'ask.opened', `agent:${agent.slug}`, { askId, gated: !!input.gated }, input.agentId);
+    // Everything an outbound hook needs to render the question and relay an
+    // answer to POST /api/asks/:id/answer, binding included — never a secret.
+    emit(db, 'ask.opened', `agent:${agent.slug}`, {
+      askId, agent: agent.slug, prompt: input.prompt, options: input.options ?? [],
+      gated: !!input.gated, actionHash: input.action ? actionHash(input.action) : null,
+      policyVersion: input.policyVersion ?? null,
+    }, input.agentId);
     return getAsk(db, askId)!;
   });
 }
@@ -243,11 +249,38 @@ export function answer(
     });
 
     // Same transaction as the verdict. There is no second "bump" path to forget,
-    // which is the bug that left agents asleep with their work done.
+    // which is the bug that left agents asleep with their work done — and the
+    // waiting run is released here too, or the bump wakes an agent the tick
+    // then refuses to dispatch.
+    releaseWaitingRun(db, row.agent_id);
     bumpWake(db, row.agent_id, 'human');
 
     emit(db, 'ask.answered', a.by, { askId, verdict }, row.agent_id);
     return { ok: true, ask: getAsk(db, askId)! };
+  });
+}
+
+/**
+ * The owner withdraws a question. Nothing is approved; the agent is woken to
+ * carry on without the answer, which its capsule will not contain.
+ */
+export function cancelAsk(db: Db, askId: string, by: string): { ok: boolean; reason?: string } {
+  return tx(db, () => {
+    const row = getAsk(db, askId);
+    if (!row) return { ok: false, reason: 'not_found' };
+    if (row.state !== 'PENDING') return { ok: false, reason: 'not_pending' };
+    db.prepare(
+      `UPDATE approval_requests SET state = 'CANCELLED', answered_by = ?, answered_at = ? WHERE id = ?`,
+    ).run(by, now(), askId);
+    appendMessage(db, {
+      agentId: row.agent_id, kind: 'event', author: by,
+      body: `Ask withdrawn without an answer: "${row.prompt}". Nothing was approved.`,
+      meta: { askId },
+    });
+    releaseWaitingRun(db, row.agent_id);
+    if (getAgent(db, row.agent_id)?.status === 'ACTIVE') bumpWake(db, row.agent_id, 'human');
+    emit(db, 'ask.cancelled', by, { askId }, row.agent_id);
+    return { ok: true };
   });
 }
 
@@ -262,14 +295,24 @@ export function expireAsks(db: Db, nowMs = now()): string[] {
   for (const row of due) {
     tx(db, () => {
       db.prepare(`UPDATE approval_requests SET state = 'EXPIRED' WHERE id = ?`).run(row.id);
-      db.prepare(
-        `UPDATE agents SET status = 'PAUSED', updated_at = ?, version = version + 1 WHERE id = ?`,
-      ).run(nowMs, row.agent_id);
+      // Everyone but the orchestrator pauses: pausing the fleet's judge over
+      // one unanswered question leaves nobody to ask for the next change.
+      const orchestrator = getAgent(db, row.agent_id)?.slug === 'orchestrator';
+      if (!orchestrator) {
+        db.prepare(
+          `UPDATE agents SET status = 'PAUSED', updated_at = ?, version = version + 1 WHERE id = ?`,
+        ).run(nowMs, row.agent_id);
+      }
+      // The question is over; the run that waited for it must not keep the
+      // agent undispatchable after a human resumes it.
+      releaseWaitingRun(db, row.agent_id);
       appendMessage(db, {
         agentId: row.agent_id,
         kind: 'report',
         author: 'system',
-        body: `Ask expired unanswered: "${row.prompt}". The agent is paused; nothing was approved.`,
+        body: orchestrator
+          ? `Ask expired unanswered: "${row.prompt}". Nothing was approved.`
+          : `Ask expired unanswered: "${row.prompt}". The agent is paused; nothing was approved.`,
         meta: { askId: row.id, expired: true },
       });
       emit(db, 'ask.expired', 'system', { askId: row.id }, row.agent_id);
@@ -284,7 +327,7 @@ export function verdictsFor(db: Db, agentId: string): Array<{ prompt: string; an
   return db
     .prepare(
       `SELECT prompt, answer FROM approval_requests
-       WHERE agent_id = ? AND state = 'APPROVED' AND answered_at IS NOT NULL
+       WHERE agent_id = ? AND state = 'APPROVED' AND answered_at IS NOT NULL AND consumed_at IS NULL
        ORDER BY answered_at DESC LIMIT 5`,
     )
     .all(agentId) as Array<{ prompt: string; answer: string }>;

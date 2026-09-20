@@ -1,7 +1,7 @@
 {
   "name": "army-of-agents",
   "description": "A continuously running agent-orchestration system with a Slack-like web workspace: named agent sessions, in-thread human-in-the-loop, live terminals, browser takeover, and voice control.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Paldom",
     "url": "https://github.com/Paldom"

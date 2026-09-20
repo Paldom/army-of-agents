@@ -1,6 +1,6 @@
 ---
 name: army-hitl
-description: Implements non-blocking human-in-the-loop for a running agent fleet - agents ask in-thread and release their session, verdicts bind the exact action, and expiry pauses rather than approves. Use for "my agent blocks waiting for approval", "an agent acted on a stale approval". Not for writing contracts, starting the fleet, or merging output.
+description: Implements non-blocking human-in-the-loop for a running agent fleet - agents ask in-thread and release their session, verdicts bind the exact action, and expiry pauses rather than approves. Use for "my agent blocks waiting for approval", "answer an agent's question hours later", "an agent acted on a stale approval". Not for writing contracts, starting the fleet, or merging output.
 license: MIT
 ---
 
@@ -44,6 +44,14 @@ That "same transaction" is not a detail. With the wake bump on a separate path,
 an agent whose question was answered goes terminal, leaves `next_due_at` NULL,
 and **sleeps forever with its work done**.
 
+The same transaction also releases the run that stopped to wait. A `BLOCKED`
+turn parks its run in `waiting_human`, which the one-live-run index and the
+tick both treat as live — rightly, while the question is open. If nothing
+moves that run on, the bump wakes an agent the tick then refuses to dispatch,
+and it sits WAITING_HUMAN with its verdict in hand. An answer, a withdrawal
+(`POST /api/asks/<id>/cancel`, which approves nothing) and an expiry all
+release it.
+
 There is a second, subtler version of the same bug, and it is worth naming
 because atomicity alone does not prevent it. The agent writes its ask *during*
 dispatch, so the workspace shows the question while the run is still settling. A
@@ -53,6 +61,30 @@ transactions, no ordering between them, and the verdict is gone.
 
 **A human bump outranks a scheduler-computed wake, always.** The settle path
 checks for a verdict answered since the run started and leaves it alone.
+
+## Saying something is not asking
+
+Three markers reach a human without costing them a decision, and all three
+land while the turn is still running:
+
+| Line | What happens |
+| --- | --- |
+| `REPORT: <one line>` | posted to the agent's thread the moment the line is complete |
+| `NOTIFY: <one line>` | a notice on Needs you and an `agent.notify` event; nothing waits on it |
+| `SEND: @<slug> <text>` | delivered to another agent's inbox; wakes it because it was named |
+
+The rest of a turn is filed as its report when it ends, so a thread is never
+empty for as long as an agent works. Each marker lands once per run, however
+many times the text is read: while streaming, at the end, and again by the
+reconciler after a restart.
+
+To reach a human who is not looking at the workspace, set `AOA_EVENT_HOOK` to
+a command that receives each `ask.opened`, `ask.expired` or `agent.notify`
+event as JSON on stdin — a push, an e-mail, or `aconn notify` from
+[agents-connect](https://github.com/Paldom/agents-connect). The payload
+carries the binding an answer must echo back; a gated ask is flagged and stays
+unanswerable from anywhere. The full vocabulary and its agents-connect mapping:
+`docs/agent-protocol.md`.
 
 ## The agent has to be told how to ask
 

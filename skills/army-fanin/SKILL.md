@@ -1,6 +1,6 @@
 ---
 name: army-fanin
-description: Reconciles parallel agent worktrees into one repository with per-change provenance - which agent, which harness, what cost, tests passed - then archives losers and reaps worktrees. Use for "merge the worktrees my agents produced", "which agent wrote this change". Not for ordinary git conflicts, rebasing, or starting the fleet.
+description: Reconciles parallel agent worktrees into one repository with per-change provenance - agent, harness, cost, tests - then archives the losing branches and reaps worktrees. Use for "merge the worktrees my agents produced", "integrate what the fleet built", "archive the losing branches", "which agent wrote this change". Not for ordinary git conflicts, rebasing, or starting the fleet.
 license: MIT
 ---
 

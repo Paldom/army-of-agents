@@ -147,6 +147,8 @@ vite.config.ts.timestamp-*
 # Deliberately never committed — except its README, which explains the convention.
 .local/*
 !.local/README.md
+# Live-session captures of a real fleet under the web app: never committed.
+app/web/.local/
 
 # OS / editor
 .DS_Store

@@ -1,6 +1,6 @@
 ---
 name: army-join
-description: Lets a session from another harness join a running fleet as a subagent, cross-reviewer or human-in-the-loop, via a scoped context package whose output is untrusted data. Use for "let a codex session review this", "second opinion from a different model". Not for starting the fleet, writing contracts, or merging output.
+description: Lets a session from another harness join a running fleet as a subagent, cross-reviewer or human-in-the-loop, via a scoped context package whose output is untrusted data. Use for "let a codex session review this", "have my grok CLI stand in as the scout agent's human-in-the-loop", "second opinion from a different model". Not for starting the fleet, writing contracts, or merging output.
 license: MIT
 ---
 
